@@ -28,8 +28,8 @@ OR OTHER DEALINGS IN THE SOFTWARE.
 error_reporting(0);
 
 
-if (!extension_loaded("openssl") && !defined("OPENSSL_KEYTYPE_EC")) api_err("Openssl php extension missing");
-if(floatval(phpversion())<7.1) api_err("The minimum php version required is 7.1");
+if (!extension_loaded("openssl") && !defined("OPENSSL_KEYTYPE_EC")) die("Openssl php extension missing");
+if(floatval(phpversion())<7.2) die("The minimum php version required is 7.2");
 
 
 $arg1=trim($argv[1]);
