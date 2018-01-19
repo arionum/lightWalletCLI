@@ -36,7 +36,7 @@ $arg1=trim($argv[1]);
 $arg2=trim($argv[2]);
 $arg3=trim($argv[3]);
 $arg4=trim($argv[4]);
-if(empty($arg1)&&file_exists("wallet.aro")){
+if((empty($arg1)&&file_exists("wallet.aro"))||$arg1=="help"||$arg1=="-h"||$arg1=="--help"){
 die("./lightArionumCLI <command> <options>\n
 Commands:\n
 balance\t\t\t\tprints the balance
@@ -180,7 +180,7 @@ function ec_verify($data, $signature, $key){
 
 function peer_post($url, $data=array()){
 
-	$f=file("https://www.arionum.com/peers.txt");
+	$f=file("http://api.arionum.com/peers.txt");
     shuffle($f);
     
 	foreach($f as $x){
@@ -251,8 +251,8 @@ if(!file_exists("wallet.aro")){
 		
 		$public_key= pem2coin($pub['key']);
 
-		$wallet="arionum:$private_key:$public_key";
-
+		$wallet="arionum:".$private_key.":".$public_key;
+		if(strlen($private_key)<20||strlen($public_key)<20) die("Could not generate the EC key pair. Please check the openssl binaries.");
 		if($encrypt===true){
 			$password = substr(hash('sha256', $pass, true), 0, 32);
             $iv=random_bytes(16);
