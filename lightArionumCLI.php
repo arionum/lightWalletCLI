@@ -368,6 +368,7 @@ if($arg1=="balance"){
     $balance=$res['data'];
     $fee=$arg3*0.0025;
     if($fee<0.00000001) $fee=0.00000001;
+    if($fee>10) $fee=10;
     $total=$arg3+$fee;
     
     $val=number_format($arg3,8,".","");
