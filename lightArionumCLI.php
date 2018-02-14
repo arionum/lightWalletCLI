@@ -221,7 +221,7 @@ function readPasswordSilently(string $prompt = ''): string {
     if(checkSystemFunctionAvailability('shell_exec') && rtrim(shell_exec("/usr/bin/env bash -c 'echo OK'")) === 'OK') {
         $password = rtrim(
             shell_exec(
-                "/usr/bin/env bash -c 'read -s -p \""
+                "/usr/bin/env bash -c 'read -rs -p \""
                 . addslashes($prompt)
                 . "\" mypassword && echo \$mypassword'"
             )
