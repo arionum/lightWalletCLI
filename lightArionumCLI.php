@@ -217,18 +217,45 @@ echo "Using node: $peer\n";
 
 }
 
+function readPasswordSilently(string $prompt = ''): string {
+    if(checkSystemFunctionAvailability('shell_exec') && rtrim(shell_exec("/usr/bin/env bash -c 'echo OK'")) === 'OK') {
+        $password = rtrim(
+            shell_exec(
+                "/usr/bin/env bash -c 'read -rs -p \""
+                . addslashes($prompt)
+                . "\" mypassword && echo \$mypassword'"
+            )
+        );
+        echo PHP_EOL;
+    } else {
+        /**
+         * Can't invoke bash or shell_exec is disabled, let's do it with a regular input instead.
+         */
+        $password = readline($prompt . ' ');
+    }
+
+    return $password;
+}
+
+function checkSystemFunctionAvailability(string $function_name): bool {
+    return !in_array(
+        $function_name,
+        explode(',', ini_get('disable_functions'))
+    );
+}
+
 if(!file_exists("wallet.aro")){
 	echo "No ARO wallet found. Generating a new wallet!\n";
 	$q=readline("Would you like to encrypt this wallet? (y/N) ");
 	$encrypt=false;
 	if(substr(strtolower(trim($q)),0,1)=="y"){
 		do {
-			$pass=readline("Password:");
+			$pass=readPasswordSilently("Password:");
 			if(strlen($pass)<8) {
 				echo "The password must be at least 8 characters long\n";
 				continue;
 		}
-		$pass2=readline("Confirm Password:");
+		$pass2=readPasswordSilently("Confirm Password:");
 		if($pass==$pass2) break;
 		else echo "The passwords did not match!\n";
 		} while(1);
@@ -273,7 +300,7 @@ $wallet=trim(file_get_contents("wallet.aro"));
 if(substr($wallet,0,7)!="arionum"){
 	echo "This wallet is encrypted.\n";
 	do {
-		$pass=readline("Password:");
+		$pass=readPasswordSilently("Password:");
 
 		$w=base64_decode($wallet);
         $iv=substr($w,0,16);
@@ -334,12 +361,12 @@ if($arg1=="balance"){
     echo "The wallet has been decrypted!\n";
 }elseif($arg1=="encrypt"){
     do {
-        $pass=readline("Password:");
+        $pass=readPasswordSilently("Password:");
         if(strlen($pass)<8) {
             echo "The password must be at least 8 characters long\n";
             continue;
     }
-    $pass2=readline("Confirm Password:");
+    $pass2=readPasswordSilently("Confirm Password:");
     if($pass==$pass2) break;
     else echo "The passwords did not match!\n";
     } while(1);
