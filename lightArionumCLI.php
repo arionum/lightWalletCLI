@@ -47,7 +47,7 @@ encrypt\t\t\t\tencrypts the wallet
 decrypt\t\t\t\tdecrypts the wallet
 transactions\t\t\tshow the latest transactions
 transaction <id>\t\tshows data about a specific transaction
-send <address> <value>\tsends a transaction
+send <address> <value> <message>\tsends a transaction (message optional)
 ");
 
 }
