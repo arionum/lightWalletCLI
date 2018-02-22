@@ -23,7 +23,7 @@ transactions ->                   show the latest transactions
 
 transaction [id] ->               shows data about a specific transaction
   
-send [address] [value] ->     sends a transaction
+send [address] [value] [message] ->     sends a transaction (message optional)
 
 
 Development Fund:

@@ -39,14 +39,15 @@ $arg4=trim($argv[4]);
 if((empty($arg1)&&file_exists("wallet.aro"))||$arg1=="help"||$arg1=="-h"||$arg1=="--help"){
 die("./lightArionumCLI <command> <options>\n
 Commands:\n
-balance\t\t\t\tprints the balance
+balance\t\t\t\tprints the balance of the wallet 
+balance <address>\t\tprints the balance of the specified address
 export\t\t\t\tprints the wallet data
 block\t\t\t\tshow data about the current block
 encrypt\t\t\t\tencrypts the wallet
 decrypt\t\t\t\tdecrypts the wallet
 transactions\t\t\tshow the latest transactions
 transaction <id>\t\tshows data about a specific transaction
-send <address> <value>\tsends a transaction
+send <address> <value> <message>\tsends a transaction (message optional)
 ");
 
 }
@@ -271,6 +272,10 @@ function checkSystemFunctionAvailability(string $function_name): bool {
     );
 }
 
+function isAddressValid(string $address): bool {
+    return preg_match('/^[a-z0-9]+$/i', $address);
+}
+
 if(!file_exists("wallet.aro")){
 	echo "No ARO wallet found. Generating a new wallet!\n";
 	$q=readline("Would you like to encrypt this wallet? (y/N) ");
@@ -357,6 +362,13 @@ echo "Your address is: ".$address."\n\n";
 
 
 if($arg1=="balance"){
+    if (!empty($arg2)) {
+        echo "Checking balance of the specified address: {$arg2}" . PHP_EOL;
+        if (!isAddressValid($arg2)) {
+            die("Error: invalid address format." . PHP_EOL);
+        }
+        $address = $arg2;
+    }
     $res=peer_post("/api.php?q=getPendingBalance",array("account"=>$address));
     if($res['status']!="ok") die("ERROR: $res[data]\n");
     else echo "Balance: $res[data]\n";
