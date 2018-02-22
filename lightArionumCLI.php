@@ -51,64 +51,91 @@ send <address> <value>\tsends a transaction
 
 }
 
-   //all credits for this base58 functions should go to tuupola / https://github.com/tuupola/base58/
-    function baseConvert(array $source, $source_base, $target_base)
+ // Base58 encoding/decoding functions - all credits go to https://github.com/stephen-hill/base58php
+    function base58_encode($string)
     {
-        $result = [];
-        while ($count = count($source)) {
-            $quotient = [];
-            $remainder = 0;
-            for ($i = 0; $i !== $count; $i++) {
-                $accumulator = $source[$i] + $remainder * $source_base;
-                $digit = (integer) ($accumulator / $target_base);
-                $remainder = $accumulator % $target_base;
-                if (count($quotient) || $digit) {
-                    array_push($quotient, $digit);
-                };
+	$alphabet='123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+	$base=strlen($alphabet);
+        // Type validation
+        if (is_string($string) === false) {
+		return false;
+        }
+        // If the string is empty, then the encoded string is obviously empty
+        if (strlen($string) === 0) {
+            return '';
+        }
+        // Now we need to convert the byte array into an arbitrary-precision decimal
+        // We basically do this by performing a base256 to base10 conversion
+        $hex = unpack('H*', $string);
+        $hex = reset($hex);
+        $decimal = gmp_init($hex, 16);
+        // This loop now performs base 10 to base 58 conversion
+        // The remainder or modulo on each loop becomes a base 58 character
+        $output = '';
+        while (gmp_cmp($decimal, $base) >= 0) {
+            list($decimal, $mod) = gmp_div_qr($decimal, $base);
+            $output .= $alphabet[gmp_intval($mod)];
+        }
+        // If there's still a remainder, append it
+        if (gmp_cmp($decimal, 0) > 0) {
+            $output .= $alphabet[gmp_intval($decimal)];
+        }
+        // Now we need to reverse the encoded data
+        $output = strrev($output);
+        // Now we need to add leading zeros
+        $bytes = str_split($string);
+        foreach ($bytes as $byte) {
+            if ($byte === "\x00") {
+                $output = $alphabet[0] . $output;
+                continue;
             }
-            array_unshift($result, $remainder);
-            $source = $quotient;
+            break;
         }
-        return $result;
+        return (string) $output;
     }
-    function base58_encode($data)
+    function base58_decode($base58)
     {
-        if (is_integer($data)) {
-            $data = [$data];
-        } else {
-            $data = str_split($data);
-            $data = array_map(function ($character) {
-                return ord($character);
-            }, $data);
+        $alphabet='123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+        $base=strlen($alphabet);
+
+        // Type Validation
+        if (is_string($base58) === false) {
+		return false;
         }
-
-
-        $converted = baseConvert($data, 256, 58);
-
-        return implode("", array_map(function ($index) {
-                $chars="123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-            return $chars[$index];
-        }, $converted));
-    }
-     function base58_decode($data, $integer = false)
-    {
-        $data = str_split($data);
-        $data = array_map(function ($character) {
-                $chars="123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-            return strpos($chars, $character);
-        }, $data);
-        /* Return as integer when requested. */
-        if ($integer) {
-            $converted = baseConvert($data, 58, 10);
-            return (integer) implode("", $converted);
+        // If the string is empty, then the decoded string is obviously empty
+        if (strlen($base58) === 0) {
+            return '';
         }
-        $converted = baseConvert($data, 58, 256);
-        return implode("", array_map(function ($ascii) {
-            return chr($ascii);
-        }, $converted));
+        $indexes = array_flip(str_split($alphabet));
+        $chars = str_split($base58);
+        // Check for invalid characters in the supplied base58 string
+        foreach ($chars as $char) {
+            if (isset($indexes[$char]) === false) {
+		return false;
+            }
+        }
+        // Convert from base58 to base10
+        $decimal = gmp_init($indexes[$chars[0]], 10);
+        for ($i = 1, $l = count($chars); $i < $l; $i++) {
+            $decimal = gmp_mul($decimal, $base);
+            $decimal = gmp_add($decimal, $indexes[$chars[$i]]);
+        }
+        // Convert from base10 to base256 (8-bit byte array)
+        $output = '';
+        while (gmp_cmp($decimal, 0) > 0) {
+            list($decimal, $byte) = gmp_div_qr($decimal, 256);
+            $output = pack('C', gmp_intval($byte)) . $output;
+        }
+        // Now we need to add leading zeros
+        foreach ($chars as $char) {
+            if ($indexes[$char] === 0) {
+                $output = "\x00" . $output;
+                continue;
+            }
+            break;
+        }
+        return $output;
     }
-
-
 
 
 function pem2coin ($data) {
