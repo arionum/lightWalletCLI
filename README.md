@@ -28,7 +28,7 @@ send [address] [value] [message] ->     sends a transaction (message optional)
 
 Development Fund:
 
-ARO: 5WuRMXGM7Pf8NqEArVz1NxgSBptkimSpvuSaYC79g1yo3RDQc8TjVtGH5chQWQV7CHbJEuq9DmW5fbm CEW4AghQr
+ARO: 5WuRMXGM7Pf8NqEArVz1NxgSBptkimSpvuSaYC79g1yo3RDQc8TjVtGH5chQWQV7CHbJEuq9DmW5fbmCEW4AghQr
 
 LTC: LWgqzbXGeucKaMmJEvwaAWPFrAgKiJ4Y4m
 
