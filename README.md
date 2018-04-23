@@ -10,26 +10,20 @@ Requires php 7.2
 ./lightArionumCLI <command> <options>
 ```
 
-Commands:
+## Commands
 
-balance ->                        prints the balance
+Command                           | Description
+--------------------------------- | ------------------
+`balance`                         | Prints the balance
+`export`                          | Prints the wallet data
+`block`                           | Show data about the current block
+`encrypt`                         | Encrypts the wallet
+`decrypt`                         | Decrypts the wallet
+`transactions`                    | Show the latest transactions
+`transaction [id]`                | Shows data about a specific transaction
+`send [address] [value] [message]`| Sends a transaction (message optional)
 
-export ->                          prints the wallet data
-
-block ->                           show data about the current block
-
-encrypt ->                        encrypts the wallet
-
-decrypt ->                         decrypts the wallet
-
-transactions ->                   show the latest transactions
-
-transaction [id] ->               shows data about a specific transaction
-  
-send [address] [value] [message] ->     sends a transaction (message optional)
-
-
-Development Fund:
+### Development Fund
 
 ARO: 5WuRMXGM7Pf8NqEArVz1NxgSBptkimSpvuSaYC79g1yo3RDQc8TjVtGH5chQWQV7CHbJEuq9DmW5fbmCEW4AghQr
 
