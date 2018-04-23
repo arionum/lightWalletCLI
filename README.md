@@ -4,9 +4,11 @@ A php based cli wallet for Arionum.
 
 Requires php 7.2
 
-Usage:
+## Usage
 
+```bash
 ./lightArionumCLI <command> <options>
+```
 
 Commands:
 
