@@ -29,6 +29,7 @@ error_reporting(0);
 
 
 if (!extension_loaded("openssl") && !defined("OPENSSL_KEYTYPE_EC")) die("Openssl php extension missing");
+if (!extension_loaded("gmp")) die("GMP php extension missing");
 if(floatval(phpversion())<7.2) die("The minimum php version required is 7.2");
 
 
