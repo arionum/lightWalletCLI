@@ -1,7 +1,8 @@
 # lightWalletCLI
-A php based cli wallet for Arionum
 
-Requires php 7.1
+A php based cli wallet for Arionum.
+
+Requires php 7.2
 
 Usage:
 
