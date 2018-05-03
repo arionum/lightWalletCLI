@@ -7,7 +7,7 @@ Requires php 7.2
 ## Usage
 
 ```bash
-./lightArionumCLI <command> <options>
+./light-arionum-cli <command> <options>
 ```
 
 ## Commands
