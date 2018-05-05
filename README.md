@@ -23,7 +23,7 @@ Command                           | Description
 `transaction [id]`                | Shows data about a specific transaction
 `send [address] [value] [message]`| Sends a transaction (message optional)
 
-### Development Fund
+## Development Fund
 
 Coin | Address
 ---- | --------
