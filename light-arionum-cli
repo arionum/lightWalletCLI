@@ -38,7 +38,7 @@ $arg2=trim($argv[2]);
 $arg3=trim($argv[3]);
 $arg4=trim($argv[4]);
 if((empty($arg1)&&file_exists("wallet.aro"))||$arg1=="help"||$arg1=="-h"||$arg1=="--help"){
-die("./lightArionumCLI <command> <options>\n
+die("light-arionum-cli <command> <options>\n
 Commands:\n
 balance\t\t\t\tprints the balance of the wallet 
 balance <address>\t\tprints the balance of the specified address
