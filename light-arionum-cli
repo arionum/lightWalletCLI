@@ -506,7 +506,6 @@ if ($arg1=="balance") {
         echo "Transaction sent! Transaction id: $res[data]\n";
     }
 } elseif (strtolower($arg1)=='alias') {
-
     if (empty($arg4)&&$arg2=="send") {
         die("ERROR: Invalid sum");
     }
