@@ -57,7 +57,7 @@ Example: alias and masternodes were added after block 80000
 
 ## Development Fund
 
-If you'd like to support Arionum development, you can donate to the addresses listed above.
+If you'd like to support Arionum development, you can donate to the addresses listed below.
 
 Coin | Address
 ---- | --------
