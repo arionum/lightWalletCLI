@@ -1882,7 +1882,7 @@ function msgInfo($case, $data='')
     case 'password_mismatch':
         $str = "Passwords did not match.\n";
         break;
-    case 'transaction_sent';
+    case 'transaction_sent':
         $str = "Transaction sent.\nTransaction id: $data\n";
         break;
     case 'transaction':
