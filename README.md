@@ -40,3 +40,15 @@ If you'd like to support the Arionum development, you can donate to the addresse
 [btc]: https://bitcoin.org
 [eth]: https://ethereum.org
 [bch]: https://www.bitcoincash.org
+
+
+# Dockerfile
+Build your Docker image:
+```
+docker build -t aronium-cli .
+```
+
+Usage:
+```
+docker run -v <full path>/wallet.aro:/aro/wallet.aro -it --rm aronium-cli <command>
+```
