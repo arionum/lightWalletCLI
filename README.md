@@ -22,6 +22,8 @@ Command                           | Description
 `transactions`                    | Show the latest transactions
 `transaction [id]`                | Shows data about a specific transaction
 `send [address] [value] [message]`| Sends a transaction (message optional)
+`alias send [alias] [message]`    | Sends a transaction to an alis (message optional)
+`alias set [alias]`               | Set your alias to the specified value
 
 ## Development Fund
 
