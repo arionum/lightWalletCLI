@@ -1,275 +1,865 @@
 #!/usr/bin/env php
 <?php
-/*
-The MIT License (MIT)
-Copyright (c) 2018 AroDev
+/**
+ * PHP CLI Light Wallet Tool for Arionum
+ *
+ * For usage, see README.md
+ *
+ * @category  Arionum
+ * @package   LightWalletCLI
+ * @author    AroDev <null@null.com>
+ * @author    KyleFromOhio <null@null.com>
+ * @copyright 2018 AroDev
+ * @license   http://www.opensource.org/licenses/mit-license.html  MIT License
+ * @link      www.arionum.com
+ */
 
-www.arionum.com
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
-DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
-OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE
-OR OTHER DEALINGS IN THE SOFTWARE.
-*/
-
+// DEBUGGING ON = 1, DEBUGGING OFF = 0
 error_reporting(0);
 
+// Define global constants
+define('DIR_CONFIG',              'config'); // eg. config/wallet.conf
+define('DIR_WALLET',              'wallets'); // eg. wallets/walletname.aro
+define('DIR_CACHE',               'cache'); // eg. cache/peers.cache
+define('DIR_PERMS',               0700); // dir chmod permissions
+define('FILE_PERMS',              0600); // file/config/cache permissions
 
-if (!extension_loaded("openssl") && !defined("OPENSSL_KEYTYPE_EC")) {
-    die("Openssl php extension missing");
+define('CACHE_PEERS',    'peers.cache'); // default arionum peers
+define('CONF_PEERS',     'peers.conf'); // (optional) custom user peers
+define('CONF_WALLET',    'wallet.conf'); // (optional) multi-wallet support; *.aro file
+define('CONF_NETWORK',   'network.conf'); // options: localhost, testnet, mainnet
+define('CONF_COIN',      'coin.conf'); // (optional) custom coin name
+
+define('NETWORK_DEFAULT',      'mainnet'); // options: localhost, testnet, mainnet
+define('WALLET_DEFAULT',       'wallet.aro'); // default filename
+define('COIN_DEFAULT',         'arionum'); // default coin
+
+define('PHPVERSION_MIN',       7.2);
+define('ARO_DECIMALS',         8);
+define('PASSWORD_MIN',         8); // for encrypted wallet
+
+define('TRANSACTION_FEE_PCT',  0.0025);
+define('TRANSACTION_FEE_MAX',  10);
+define('TRANSACTION_FEE_MIN',  0.00000001);
+define('TRANSACTION_MSG_MAX',  128); // max length of message
+
+define('MASTERNODE_COST',      100000);
+define('MASTERNODE_FEE',       10);
+
+define('ALIAS_FEE',            10);
+define('ALIAS_CHAR_MIN',       4);
+define('ALIAS_CHAR_MAX',       25);
+
+
+define('CACHE_PEERS_HRS',  72); // for caching CACHE_PEERS
+define('URL_LOCALHOST',        'http://127.0.0.1');
+define('URL_PEERSLIST',        'http://api.arionum.com/peers.txt');
+define('PEERPOST_TIMEOUT',     300); // seconds
+
+// Transaction Type Codes (in API send command the variable is '$version' in signature)
+define('TRANSACTION_CODE_SEND',       1);
+define('TRANSACTION_CODE_ALIAS_SEND', 2);
+define('TRANSACTION_CODE_ALIAS_SET',  3);
+define('TRANSACTION_CODE_MN_CREATE',  100);
+define('TRANSACTION_CODE_MN_PAUSE',   101);
+define('TRANSACTION_CODE_MN_RESUME',  102);
+define('TRANSACTION_CODE_MN_RELEASE', 103);
+
+// Check prerequisites
+if (!extension_loaded('openssl') && !defined('OPENSSL_KEYTYPE_EC')) {
+    $error_strs = ['openssl', 'OPENSSL_KEYTYPE_EC'];
+    $msg = msgError('prerequisites', $error_strs);
+    exitError($msg);
 }
-if (!extension_loaded("gmp")) {
-    die("GMP php extension missing");
+if (!extension_loaded('gmp')) {
+    $error_strs = ['gmp'];
+    $msg = msgError('prerequisites', $error_strs);
+    exitError($msg);
 }
-if (floatval(phpversion())<7.2) {
-    die("The minimum php version required is 7.2");
+if (floatval(phpversion())<PHPVERSION_MIN) {
+    $str = 'PHP CLI >'.PHPVERSION_MIN;
+    $error_strs = [$str];
+    $msg = msgError('prerequisites', $error_strs);
+    exitError($msg);
 }
 
-$localhost=false;
-
-$arg1=trim($argv[1]);
-$arg2=trim($argv[2]);
-$arg3=trim($argv[3]);
-$arg4=trim($argv[4]);
-$arg5=trim($argv[5]);
-if ((empty($arg1)&&file_exists("wallet.aro"))||$arg1=="help"||$arg1=="-h"||$arg1=="--help") {
-    die("light-arionum-cli <command> <options>\n
-Commands:\n
-balance\t\t\t\tprints the balance of the wallet 
-balance <address>\t\tprints the balance of the specified address
-export\t\t\t\tprints the wallet data
-block\t\t\t\tshow data about the current block
-encrypt\t\t\t\tencrypts the wallet
-decrypt\t\t\t\tdecrypts the wallet
-transactions\t\t\tshow the latest transactions
-transaction <id>\t\tshows data about a specific transaction
-send <address> <value> <message>\tsends a transaction (message optional)
-alias send <alias> <message>\tsends a transaction (message optional)
-alias set <alias>\tsets your alias
-masternode create <ip>\tsends a masternode announcement transaction
-masternode pause\tputs the masternode on pause
-masternode resume\tresumes the masternode mining
-masternode release\tcloses the masternode and returns the funds
-");
+// check if required directories exist; create otherwise
+$result = setupDirectories();
+if (!$result) {
+    $msg = msgError('write_directory');
+    exitError($msg);
 }
 
- // Base58 encoding/decoding functions - all credits go to https://github.com/stephen-hill/base58php
-    function base58_encode($string)
-    {
-        $alphabet='123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
-        $base=strlen($alphabet);
-        // Type validation
-        if (is_string($string) === false) {
+// get network config (if exists)
+$network = getNetworkConf();
+define('NETWORK', $network);
+
+// get coin config; (if exists)
+$coin = getCoinConf();
+define('COIN_NAME', $coin);
+
+// get wallet config; (if exists)
+$wallet = getWalletConf();
+define('WALLET_NAME', $wallet);
+define('WALLET_PATH', DIR_WALLET.'/'.WALLET_NAME);
+
+// get/cache remote peers list and set peer to use
+$peer = getRandomPeer();
+if (!$peer) {
+    $msg = msgError('invalid_peer');
+    exitError($msg);
+}
+define('URL_PEER', $peer);
+
+
+/**
+ * Return the help description text
+ *
+ * @return string
+ */
+function msgHelp()
+{
+
+    $str = "";
+    $str .= "EXAMPLE: php light-arionum-cli <command> <options>".PHP_EOL;
+    $mask = "| %12s %-29s :%s\n";
+
+    $str .= sprintf($mask, 'COMMAND', 'OPTIONS', 'DESCRIPTION');
+    $str .= sprintf($mask, 'alias', 'set <NAME>', 'registers your alias; '.ALIAS_FEE.' ARO fee');
+    $str .= sprintf($mask, 'balance', '', 'print balance of current wallet');
+    $str .= sprintf($mask, 'balance', '<address>', 'print balance of specified address');
+    $str .= sprintf($mask, 'block', '', 'print data about the current block');
+    $str .= sprintf($mask, 'decrypt', '', 'decrypt current wallet');
+    $str .= sprintf($mask, 'encrypt', '', 'encrypt current wallet');
+    $str .= sprintf($mask, 'export', '', 'print wallet address and keys');
+    $str .= sprintf($mask, 'list', 'wallets', 'prints list of wallet filenames');
+    $str .= sprintf($mask, 'masternode', 'create <ip>', 'register your masternode; '.MASTERNODE_COST.' ARO cost');
+    $str .= sprintf($mask, 'masternode', 'pause', 'put masternode on pause');
+    $str .= sprintf($mask, 'masternode', 'resume', 'resume masternode mining');
+    $str .= sprintf($mask, 'masternode', 'release', 'close masternode and return funds');
+    $str .= sprintf($mask, 'send', '<address> <value> "<message>"', 'send transaction to address (or alias); message optional');
+    $str .= sprintf($mask, 'set', '<peer|wallet|network> <value>', 'set custom config');
+    $str .= sprintf($mask, 'transactions', '<limit>', 'print latest transactions');
+    $str .= sprintf($mask, 'transaction', '<tid>', 'print a specific transaction by tid');
+
+    return $str;
+}
+
+
+
+// Define variables
+$wallet_exists = checkFileExists(WALLET_PATH);
+
+// Retreive command line arguments
+$arg1 = trim($argv[1]);
+$arg2 = trim($argv[2]);
+$arg3 = trim($argv[3]);
+$arg4 = trim($argv[4]);
+$arg5 = trim($argv[5]);
+
+// if no wallet, void all other commands and create wallet
+if (!$wallet_exists)$arg1='create';
+
+// Notify user of config data
+echo msgInfo('with_network', NETWORK);
+echo msgInfo('with_wallet', WALLET_NAME);
+echo msgInfo('with_peer', URL_PEER);
+
+// process argument #1
+switch ($arg1) {
+
+case 'alias':
+    $wallet  = openWallet();
+    $command = $arg2;
+    $alias   = $arg3;
+    // TODO: refactor this ...
+    runAlias($wallet, $command, $alias);
+    break;
+
+case 'balance':
+    $wallet = openWallet();
+    $address = $wallet['address'];
+    if (!empty($arg2)) $address = $arg2;
+    $balance = getBalance($address);
+    $balance_pending = getPendingBalance($address);
+    echo msgInfo('address', $wallet);
+    echo msgInfo('balance', $balance);
+    if ($balance != $balance_pending) {
+        echo msgInfo('balancepending', $balance_pending);
+    }
+    break;
+
+case 'block':
+    $block = getCurrentBlock();
+    echo msgInfo('block_current', $block);
+    break;
+
+case 'create':
+    $wallet = createWallet();
+    echo msgInfo('address', $wallet);
+    echo msgInfo('public_key', $wallet);
+    echo msgInfo('private_key', $wallet);
+    break;
+
+case 'decrypt':
+    $wallet = openWallet();
+    echo msgInfo('wallet_decrypting', $wallet);
+    $result = decryptWallet($wallet);
+    if ($result) {
+        echo msgInfo('address', $wallet);
+        echo msgInfo('public_key', $wallet);
+        echo msgInfo('private_key_hidden', $wallet);
+        echo msgInfo('wallet_decrypted_success');
+    } else {
+        $msg = msgError('write_wallet_file');
+        exitError($msg);
+    }
+    break;
+
+case 'encrypt':
+    $wallet = openWallet();
+    echo msgInfo('wallet_encrypting', $wallet);
+    $password = readConfirmPassword();
+    $result = encryptWallet($wallet, $password);
+    if ($result) {
+        echo msgInfo('address', $wallet);
+        echo msgInfo('public_key', $wallet);
+        echo msgInfo('private_key_hidden', $wallet);
+        echo msgInfo('wallet_encrypted_success');
+    } else {
+        $msg = msgError('write_wallet_file');
+        exitError($msg);
+    }
+    break;
+
+case 'export':
+    $wallet = openWallet();
+    echo msgInfo('address', $wallet);
+    echo msgInfo('public_key', $wallet);
+    echo msgInfo('private_key', $wallet);
+    break;
+
+case 'list':
+    $command = $arg2;
+    $items = listItems($command);
+    echo msgInfo('items', $items);
+    break;
+
+case 'masternode':
+    $wallet     = openWallet();
+    $command    = $arg2;
+    $ip_address = $arg3;
+    // TODO: refactor this ...
+    runMasternode($wallet, $command, $ip_address);
+    break;
+
+case 'send':
+    $to_address      = $arg2;
+    $transaction_val = $arg3;
+    $message         = $arg4;
+    // TODO: refactor validations
+    if (!isValidAddress($to_address)) {
+        $msg = msgError('invalid_address');
+        exitError($msg);
+    }
+    if (!isValidAmount($transaction_val)) {
+        $msg = msgError('invalid_amount');
+        exitError($msg);
+    }
+    if (strlen($message) > TRANSACTION_MSG_MAX) {
+        $msg = msgError('invalid_message_length', TRANSACTION_MSG_MAX);
+        exitError($msg);
+    }
+    if (strlen($to_address) <= ALIAS_CHAR_MAX && !isValidAlias($to_address)) {
+        $msg = msgError('invalid_alias');
+        exitError($msg);
+    }
+    $wallet = openWallet();
+    // TODO: refactor this ...
+    runSendTransaction($wallet, $to_address, $transaction_val, $message);
+    break;
+
+case 'set':
+    $conf   = $arg2;
+    $value  = $arg3;
+    $result = setConf($conf, $value);
+    if ($result) {
+        echo msgInfo('conf_set_success');
+    } else {
+        $msg = msgError('conf_set_fail');
+        exitError($msg);
+    }
+    break;
+
+case 'transaction':
+    $transaction = getTransaction($arg2);
+    echo msgInfo('transaction', $transaction);
+    break;
+
+case 'transactions':
+    $limit = $arg2;
+    $wallet = openWallet();
+    $transactions = getTransactions($wallet['address'], $limit);
+    echo msgInfo('transactions', $transactions);
+    break;
+
+case 'help':
+case '-h':
+case '--help':
+    if ($wallet_exists) echo msgHelp();
+    break;
+
+default:
+    $msg = msgError('invalid_command');
+    exitError($msg);
+    break;
+
+}; // endswitch $arg1
+
+/**
+ * Check if file exists.
+ *
+ * @param string $filename file to check
+ *
+ * @return bool true/false
+ */
+function checkFileExists($filename)
+{
+    return file_exists($filename) ? true : false;
+}
+
+/**
+ * Setup directories for cache, config, wallet
+ *
+ * @return bool true/false
+ */
+function setupDirectories()
+{
+    clearstatcache();
+    try {
+        // create dirs
+        if (!checkFileExists(DIR_CONFIG)) mkdir(DIR_CONFIG, DIR_PERMS, true);
+        if (!checkFileExists(DIR_CACHE)) mkdir(DIR_CACHE, DIR_PERMS, true);
+        $dir_wallet = checkFileExists(DIR_WALLET);
+        if (!$dir_wallet) mkdir(DIR_WALLET, DIR_PERMS, true);
+
+        // if old version; move existing wallet to new wallets dir; dont overwrite existing
+        $old_filename = 'wallet.aro';
+        $old_wallet_exists = checkFileExists($old_filename); // old default name in rootpath
+        $new_wallet_path = DIR_WALLET.'/'.$old_filename;
+        $new_wallet_exists = checkFileExists($new_wallet_path);
+        if ($old_wallet_exists && !$new_wallet_exists) {
+            rename($old_filename, $new_wallet_path);
+            @chmod($path_cache, FILE_PERMS);
+        }
+    } catch (Exception $e) {
+        return false;
+    }
+
+    return true;
+}
+
+/**
+ * Return if valid network or not; case sensitive
+ *
+ * @param string $network name
+ *
+ * @return bool
+ */
+function isValidNetwork($network)
+{
+    return in_array($network, ['localhost', 'testnet', 'mainnet']);
+}
+
+/**
+ * Return if valid network or not; case sensitive
+ *
+ * @param string $walletname ie. wallet.aro
+ *
+ * @return bool
+ */
+function isValidWalletName($walletname)
+{
+    $result = true;
+    if (strlen($walletname)<5) return false;
+    if (!endsWith($walletname, '.aro')) return false;
+    return $result;
+}
+
+/**
+ * Check config for custom coin or use default
+ *
+ * @return string name
+ */
+function getCoinConf()
+{
+    $path = DIR_CONFIG.'/'.CONF_COIN;
+    $conf_exists = checkFileExists($path);
+    $coin = COIN_DEFAULT;
+    if ($conf_exists) {
+        $string = trim(file_get_contents($path));
+        if (strlen($string)>2) $coin = $string;
+    }
+    return strtolower(trim($coin));
+}
+
+/**
+ * Check config for custom network or use default
+ *
+ * @return string network name
+ */
+function getNetworkConf()
+{
+    $path = DIR_CONFIG.'/'.CONF_NETWORK;
+    $conf_exists = checkFileExists($path);
+    $network = NETWORK_DEFAULT;
+    // use custom config
+    if ($conf_exists) {
+        $string = trim(file_get_contents($path));
+        if (isValidNetwork($string)) $network = $string;
+    }
+    return strtolower(trim($network));
+}
+
+/**
+ * Check config for custom wallet or use default
+ *
+ * @return string name
+ */
+function getWalletConf()
+{
+    $path = DIR_CONFIG.'/'.CONF_WALLET;
+    $conf_exists = checkFileExists($path);
+    $wallet = WALLET_DEFAULT;
+    if ($conf_exists) {
+        $string = trim(file_get_contents($path));
+        if (strlen($string)>4 && stristr($string, '.aro')) $wallet = $string;
+    }
+    return trim($wallet);
+}
+
+/**
+ * Set a custom config (.conf) setting to override default
+ *
+ * @param string $conf  name of config
+ * @param string $value to set config to
+ *
+ * @return bool
+ */
+function setConf($conf, $value)
+{
+    // required fields
+    if (empty($conf)) return false;
+    if (empty($value)) return false;
+
+    $value = trim($value);
+    switch ($conf) {
+    case 'peer':
+        if (!isValidPeer($value)) {
+            $msg = msgError('invalid_peer_url');
+            exitError($msg);
+        }
+        $path = DIR_CONFIG.'/'.CONF_PEERS;
+        $result_write = file_put_contents($path, $value);
+        @chmod($path, FILE_PERMS);
+        break;
+    case 'network':
+        if (!isValidNetwork($value)) {
+            $msg = msgError('invalid_network_name');
+            exitError($msg);
+        }
+        $path = DIR_CONFIG.'/'.CONF_NETWORK;
+        $result_write = file_put_contents($path, $value);
+        @chmod($path, FILE_PERMS);
+        break;
+    case 'wallet':
+        if (!isValidWalletName($value)) {
+            $msg = msgError('invalid_wallet_name');
+            exitError($msg);
+        }
+        $path = DIR_CONFIG.'/'.CONF_WALLET;
+        $result_write = file_put_contents($path, $value);
+        @chmod($path, FILE_PERMS);
+        break;
+
+    default:
+        return false;
+        break;
+    }
+    // if write failed or bytes < X; notify fail
+    if ($result_write === false || $result_write < 3) {
+        $msg = msgError('write_file');
+        exitError($msg);
+    }
+    return true;
+}
+
+/**
+ * Decode a string into base58.
+ *
+ * @param string $base58 The base58 encoded string.
+ *
+ * @link https://github.com/stephen-hill/base58php
+ *
+ * @return string Returns the decoded string.
+ */
+function decodeBase58($base58)
+{
+    $alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+    $base = strlen($alphabet);
+
+    // Type Validation
+    if (is_string($base58) === false) {
+        return false;
+    }
+    // If the string is empty, then the decoded string is obviously empty
+    if (strlen($base58) === 0) {
+        return '';
+    }
+    $indexes = array_flip(str_split($alphabet));
+    $chars = str_split($base58);
+    // Check for invalid characters in the supplied base58 string
+    foreach ($chars as $char) {
+        if (isset($indexes[$char]) === false) {
             return false;
         }
-        // If the string is empty, then the encoded string is obviously empty
-        if (strlen($string) === 0) {
-            return '';
-        }
-        // Now we need to convert the byte array into an arbitrary-precision decimal
-        // We basically do this by performing a base256 to base10 conversion
-        $hex = unpack('H*', $string);
-        $hex = reset($hex);
-        $decimal = gmp_init($hex, 16);
-        // This loop now performs base 10 to base 58 conversion
-        // The remainder or modulo on each loop becomes a base 58 character
-        $output = '';
-        while (gmp_cmp($decimal, $base) >= 0) {
-            list($decimal, $mod) = gmp_div_qr($decimal, $base);
-            $output .= $alphabet[gmp_intval($mod)];
-        }
-        // If there's still a remainder, append it
-        if (gmp_cmp($decimal, 0) > 0) {
-            $output .= $alphabet[gmp_intval($decimal)];
-        }
-        // Now we need to reverse the encoded data
-        $output = strrev($output);
-        // Now we need to add leading zeros
-        $bytes = str_split($string);
-        foreach ($bytes as $byte) {
-            if ($byte === "\x00") {
-                $output = $alphabet[0] . $output;
-                continue;
-            }
-            break;
-        }
-        return (string) $output;
     }
-    function base58_decode($base58)
-    {
-        $alphabet='123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
-        $base=strlen($alphabet);
-
-        // Type Validation
-        if (is_string($base58) === false) {
-            return false;
-        }
-        // If the string is empty, then the decoded string is obviously empty
-        if (strlen($base58) === 0) {
-            return '';
-        }
-        $indexes = array_flip(str_split($alphabet));
-        $chars = str_split($base58);
-        // Check for invalid characters in the supplied base58 string
-        foreach ($chars as $char) {
-            if (isset($indexes[$char]) === false) {
-                return false;
-            }
-        }
-        // Convert from base58 to base10
-        $decimal = gmp_init($indexes[$chars[0]], 10);
-        for ($i = 1, $l = count($chars); $i < $l; $i++) {
-            $decimal = gmp_mul($decimal, $base);
-            $decimal = gmp_add($decimal, $indexes[$chars[$i]]);
-        }
-        // Convert from base10 to base256 (8-bit byte array)
-        $output = '';
-        while (gmp_cmp($decimal, 0) > 0) {
-            list($decimal, $byte) = gmp_div_qr($decimal, 256);
-            $output = pack('C', gmp_intval($byte)) . $output;
-        }
-        // Now we need to add leading zeros
-        foreach ($chars as $char) {
-            if ($indexes[$char] === 0) {
-                $output = "\x00" . $output;
-                continue;
-            }
-            break;
-        }
-        return $output;
+    // Convert from base58 to base10
+    $decimal = gmp_init($indexes[$chars[0]], 10);
+    for ($i = 1, $l = count($chars); $i < $l; $i++) {
+        $decimal = gmp_mul($decimal, $base);
+        $decimal = gmp_add($decimal, $indexes[$chars[$i]]);
     }
-
-
-function pem2coin($data)
-{
-    $data=str_replace("-----BEGIN PUBLIC KEY-----", "", $data);
-    $data=str_replace("-----END PUBLIC KEY-----", "", $data);
-    $data=str_replace("-----BEGIN EC PRIVATE KEY-----", "", $data);
-    $data=str_replace("-----END EC PRIVATE KEY-----", "", $data);
-    $data=str_replace("\n", "", $data);
-    $data=base64_decode($data);
-    return base58_encode($data);
+    // Convert from base10 to base256 (8-bit byte array)
+    $output = '';
+    while (gmp_cmp($decimal, 0) > 0) {
+        list($decimal, $byte) = gmp_div_qr($decimal, 256);
+        $output = pack('C', gmp_intval($byte)) . $output;
+    }
+    // Now we need to add leading zeros
+    foreach ($chars as $char) {
+        if ($indexes[$char] === 0) {
+            $output = "\x00" . $output;
+            continue;
+        }
+        break;
+    }
+    return $output;
 }
 
-function get_address($hash)
+/**
+ * Encode a string into base58.
+ *
+ * @param string $string The string you wish to encode.
+ *
+ * @link https://github.com/stephen-hill/base58php
+ *
+ * @return string The Base58 encoded string.
+ */
+function encodeBase58($string)
 {
-    for ($i=0;$i<9;$i++) {
-        $hash=hash('sha512', $hash, true);
+    $alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+    $base = strlen($alphabet);
+    // Type validation
+    if (is_string($string) === false) {
+        return false;
     }
-    return base58_encode($hash);
+    // If the string is empty, then the encoded string is obviously empty
+    if (strlen($string) === 0) {
+        return '';
+    }
+    // Now we need to convert the byte array into an arbitrary-precision decimal
+    // We basically do this by performing a base256 to base10 conversion
+    $hex = unpack('H*', $string);
+    $hex = reset($hex);
+    $decimal = gmp_init($hex, 16);
+    // This loop now performs base 10 to base 58 conversion
+    // The remainder or modulo on each loop becomes a base 58 character
+    $output = '';
+    while (gmp_cmp($decimal, $base) >= 0) {
+        list($decimal, $mod) = gmp_div_qr($decimal, $base);
+        $output .= $alphabet[gmp_intval($mod)];
+    }
+    // If there's still a remainder, append it
+    if (gmp_cmp($decimal, 0) > 0) {
+        $output .= $alphabet[gmp_intval($decimal)];
+    }
+    // Now we need to reverse the encoded data
+    $output = strrev($output);
+    // Now we need to add leading zeros
+    $bytes = str_split($string);
+    foreach ($bytes as $byte) {
+        if ($byte === "\x00") {
+            $output = $alphabet[0] . $output;
+            continue;
+        }
+        break;
+    }
+    return (string) $output;
 }
 
-
-function coin2pem($data, $is_private_key=false)
+/**
+ * Converts ARO data back to RSA key form
+ *
+ * @param string  $data     ARO decoded string
+ * @param boolean $key_type determines between a private and public key conversion
+ *
+ * @return string Returns the RSA encoded string.
+ */
+function convertKeyToPem($data, $key_type='public')
 {
-    $data=base58_decode($data);
-    $data=base64_encode($data);
+    $data = decodeBase58($data);
+    $data = base64_encode($data);
 
-    $dat=str_split($data, 64);
-    $data=implode("\n", $dat);
+    $data = str_split($data, 64);
+    $data = implode("\n", $data);
 
-    if ($is_private_key) {
+    if ($key_type=='private') {
         return "-----BEGIN EC PRIVATE KEY-----\n".$data."\n-----END EC PRIVATE KEY-----\n";
     }
-    return "-----BEGIN PUBLIC KEY-----\n".$data."\n-----END PUBLIC KEY-----\n";
-}
-function ec_sign($data, $key)
-{
-    $private_key=coin2pem($key, true);
-   
-   
-    $pkey=openssl_pkey_get_private($private_key);
-  
-    $k=openssl_pkey_get_details($pkey);
-
-
-    openssl_sign($data, $signature, $pkey, OPENSSL_ALGO_SHA256);
-  
-    
-    
-    return base58_encode($signature);
+    if ($key_type=='public') {
+        return "-----BEGIN PUBLIC KEY-----\n".$data."\n-----END PUBLIC KEY-----\n";
+    }
+    return '';
 }
 
-
-function ec_verify($data, $signature, $key)
+/**
+ * Converts RSA key strings to its equivalent ARO data
+ *
+ * @param string $data RSA (public key or private key)
+ *
+ * @return string Returns the decoded string.
+ */
+function convertPemToKey($data)
 {
-    $public_key=coin2pem($key);
-   
-    $signature=base58_decode($signature);
-    
-    $pkey=openssl_pkey_get_public($public_key);
-  
-    $res=openssl_verify($data, $signature, $pkey, OPENSSL_ALGO_SHA256);
-  
- 
-    if ($res===1) {
+    $data = str_replace('-----BEGIN PUBLIC KEY-----', '', $data);
+    $data = str_replace('-----END PUBLIC KEY-----', '', $data);
+    $data = str_replace('-----BEGIN EC PRIVATE KEY-----', '', $data);
+    $data = str_replace('-----END EC PRIVATE KEY-----', '', $data);
+    $data = str_replace("\n", '', $data);
+    $data = base64_decode($data);
+    return encodeBase58($data);
+}
+
+/**
+ * Converts the public key to an ARO address.
+ *
+ * @param string $hash public key
+ *
+ * @return string Returns the decoded string.
+ */
+function convertPublicKeyToAddress($hash)
+{
+    for ($i = 0; $i < 9; $i++) {
+        $hash = hash('sha512', $hash, true);
+    }
+    return encodeBase58($hash);
+}
+
+/**
+ * Transaction's digital signature
+ *
+ * @param string $data Transaction details
+ * @param string $key  ARO wallet's private key
+ *
+ * @return return Result    base58 encoded string
+ */
+function ecSign($data, $key)
+{
+    $key_type = 'private';
+    $private_key_pem = convertKeyToPem($key, $key_type);
+    $private_key = openssl_pkey_get_private($private_key_pem);
+    $key_details = openssl_pkey_get_details($private_key);
+    openssl_sign($data, $signature, $private_key, OPENSSL_ALGO_SHA256);
+    return encodeBase58($signature);
+}
+
+/**
+ * Verify transaction signature
+ *
+ * @param string $data      Transaction details
+ * @param string $signature base58 encoded string
+ * @param string $key       ARO wallet's private key
+ *
+ * @return bool           true/false
+ */
+function ecVerify($data, $signature, $key)
+{
+    $key_type = 'public';
+    $public_key_pem = convertKeyToPem($key, $key_type);
+    $signature = decodeBase58($signature);
+    $public_key = openssl_pkey_get_public($public_key_pem);
+    $result = openssl_verify($data, $signature, $public_key, OPENSSL_ALGO_SHA256);
+
+    if ($result === 1) {
         return true;
     }
     return false;
 }
 
-
-function peer_post($url, $data=array())
+/**
+ * Grab random peer to communicate with
+ *
+ * @return string of peer url OR false if none found
+ */
+function getRandomPeer()
 {
-    global $localhost;
-    if (!$localhost) {
-        $f=file("http://api.arionum.com/peers.txt");
-        shuffle($f);
-    
-        foreach ($f as $x) {
-            if (strlen(trim($x))>5) {
-                $peer=trim($x);
-                break;
-            }
-        }
-   
-        if (empty($peer)) {
-            return false;
-        }
-    } else {
-        $peer="http://127.0.0.1";
+    $peer = false;
+    switch (NETWORK) {
+    // private testnet
+    case 'localhost':
+        $peer = URL_LOCALHOST;
+        break;
+    // public testnet
+    case 'testnet':
+        // TODO when testnet available this needs updated with testnet urls
+        $peer = URL_LOCALHOST;
+        $custom_peer = getRandomCustomPeer();
+        if ($custom_peer) $peer = $custom_peer;
+        break;
+    // public mainnet
+    case 'mainnet':
+        // grab official peers list
+        $peers = cachePeersList();
+        // grab first peer on list
+        shuffle($peers);
+        if (isset($peers[0]) && strlen(trim($peers[0])) > 5)$peer = trim($peers[0]);
+        break;
+    default:
+        $peer = false;
+        break;
+    }
+    // if peer a valid url?
+    if (filter_var($peer, FILTER_VALIDATE_URL) === false) {
+        return false;
+    }
+    return $peer;
+}
+
+/**
+ * Return random peer from users customer peers config
+ *
+ * @return string of peer url or false if failed
+ */
+function getRandomCustomPeer()
+{
+    // check if user create custom peers list
+    $path_custom = DIR_CONFIG.'/'.CONF_PEERS;
+    $file_exists = checkFileExists($path_custom);
+    if ($file_exists) {
+        $peers = file($path_custom);
+        shuffle($peers);
+        return isset($peers[0])?$peers[0]:false;
+    }
+    return false;
+}
+
+/**
+ * Return peers list as an array; cache remote peers list locally for X hours
+ * If local custom peers list existl use that
+ *
+ * @return array of peers urls
+ */
+function cachePeersList()
+{
+    // check if user create custom peers list
+    $path_custom = DIR_CONFIG.'/'.CONF_PEERS;
+    $file_exists = checkFileExists($path_custom);
+    if ($file_exists) {
+        $peers = file($path_custom);
+        return $peers;
     }
 
-    echo "Using node: $peer\n";
+    // otherwise use official remote peers list and cache it locally for X hours
+    $path_cache = DIR_CACHE.'/'.CACHE_PEERS;
+    $file_exists = checkFileExists($path_cache);
+    if (!$file_exists) {
+        // grab official peers list
+        $peerslist_text = file_get_contents(URL_PEERSLIST);
+        // store locally
+        $result = file_put_contents($path_cache, $peerslist_text);
+        // fail if cant write or file is < X bytes
+        $min_bytes = 10;
+        if ($result === false || $result < $min_bytes) {
+            $msg = msgError('write_file');
+            exitError($msg);
+        }
+        @chmod($path_cache, FILE_PERMS);
+    } else {
+        // check age of cache file; if old delete and rerun function
+        $cache_mtime = filemtime($path_cache);
+        $file_age_hrs = (time() - $cache_mtime) / 3600; // seconds to hours
+        if ($file_age_hrs > CACHE_PEERS_HRS ) {
+            // file older than X hours
+            unlink($path_cache);
+            // rerun function to get new file
+            cachePeersList();
+        }
+    }
+    // TODO: "file" and/or "file_get_contents" seems slow/bottleneck on local computer
+    $peers = file(URL_PEERSLIST);
+    return $peers;
+}
+
+/**
+ * API POST call to random peer
+ *
+ * @param string $pathquery API path and querystring eg. /api.php?some=query
+ * @param array  $data      POST data for API call
+ *
+ * @return json Result      API response
+ */
+function postPeer($pathquery, $data=array())
+{
+    // create API url
+    $posturl = URL_PEER.$pathquery;
+
+    // crete POST data for API call
     $postdata = http_build_query(
         array(
             'data' => json_encode($data),
-            "coin"=>" arionum"
-            )
+            'coin' => COIN_NAME
+        )
     );
-    
-    $opts = array('http' =>
-        array(
-            'timeout' => "300",
+    $options = array(
+        'http' => array(
+            'timeout' => PEERPOST_TIMEOUT, // TODO: decrease and catch these
             'method'  => 'POST',
             'header'  => 'Content-type: application/x-www-form-urlencoded',
             'content' => $postdata
         )
     );
-    
-    $context  = stream_context_create($opts);
-    
-    $result = file_get_contents($peer.$url, false, $context);
-    $res=json_decode($result, true);
-    return $res;
+    // get stream
+    $context = stream_context_create($options);
+    // TODO: catch errors/timeouts
+
+    // convert stream to array; check if invalid
+    $result_string = file_get_contents($posturl, false, $context);
+    if (trim($result_string)=='') return false;
+    $result_array = json_decode($result_string, true);
+    if (!$result_array || !is_array($result_array) || !isset($result_array['status'])) return false;
+
+    // add request info to array
+    $request = [
+        'peer'      => URL_PEER,
+        'pathquery' => $pathquery,
+        'postdata'  => $postdata,
+    ];
+    $result_array['request'] = $request;
+
+    return $result_array;
 }
 
-function readPasswordSilently(string $prompt = ''): string
+/**
+ * Reading password input without displaying any character(s)
+ *
+ * @param string|null $prompt Prompt password message/label
+
+ * @return [type]              [description]
+ */
+function readPasswordSilently(string $prompt = null)
 {
-    if (checkSystemFunctionAvailability('shell_exec') && rtrim(shell_exec("/usr/bin/env bash -c 'echo OK'")) === 'OK') {
+    if (checkFunctionExists('shell_exec') && rtrim(shell_exec("/usr/bin/env bash -c 'echo OK'")) === 'OK') {
         $password = rtrim(
             shell_exec(
                 "/usr/bin/env bash -c 'read -rs -p \""
@@ -288,343 +878,1192 @@ function readPasswordSilently(string $prompt = ''): string
     return $password;
 }
 
-function checkSystemFunctionAvailability(string $function_name): bool
+/**
+ * Verifies if a certain function exists
+ *
+ * @param string $function_name function name
+ *
+ * @return bool                  true/false
+ */
+function checkFunctionExists(string $function_name)
 {
     return !in_array(
         $function_name,
-        explode(',', ini_get('disable_functions'))
+        explode(', ', ini_get('disable_functions'))
     );
 }
 
-function isAddressValid(string $address): bool
+/**
+ * Check if string ends with substring
+ *
+ * @param string $haystack (haystack)
+ * @param string $needle   (needle)
+ *
+ * @return bool
+ */
+function endsWith($haystack, $needle)
+{
+    $hlen = strlen($haystack);
+    $nlen = strlen($needle);
+    if ($nlen > $hlen) return false;
+    return substr_compare($haystack, $needle, $hlen - $nlen, $nlen) === 0;
+}
+
+/**
+ * Validate ARO address
+ *
+ * @param string $address ARO address
+ *
+ * @return bool          true/false
+ */
+function isValidAddress(string $address)
 {
     return preg_match('/^[a-z0-9]+$/i', $address);
 }
 
-if (!file_exists("wallet.aro")) {
-    echo "No ARO wallet found. Generating a new wallet!\n";
-    $q=readline("Would you like to encrypt this wallet? (y/N) ");
-    $encrypt=false;
-    if (substr(strtolower(trim($q)), 0, 1)=="y") {
-        do {
-            $pass=readPasswordSilently("Password:");
-            if (strlen($pass)<8) {
-                echo "The password must be at least 8 characters long\n";
-                continue;
-            }
-            $pass2=readPasswordSilently("Confirm Password:");
-            if ($pass==$pass2) {
-                break;
-            } else {
-                echo "The passwords did not match!\n";
-            }
-        } while (1);
-        $encrypt=true;
-    }
-
-    $args = array(
-            "curve_name" => "secp256k1",
-            "private_key_type" => OPENSSL_KEYTYPE_EC,
-        );
-        
-        
-    $key1 = openssl_pkey_new($args);
-        
-    openssl_pkey_export($key1, $pvkey);
-        
-    $private_key= pem2coin($pvkey);
-    
-    $pub = openssl_pkey_get_details($key1);
-        
-    $public_key= pem2coin($pub['key']);
-
-    $wallet="arionum:".$private_key.":".$public_key;
-    if (strlen($private_key)<20||strlen($public_key)<20) {
-        die("Could not generate the EC key pair. Please check the openssl binaries.");
-    }
-    if ($encrypt===true) {
-        $password = substr(hash('sha256', $pass, true), 0, 32);
-        $iv=random_bytes(16);
-        $wallet = base64_encode($iv.base64_encode(openssl_encrypt($wallet, 'aes-256-cbc', $password, OPENSSL_RAW_DATA, $iv)));
-    }
-
-    $res=file_put_contents("wallet.aro", $wallet);
-    if ($res===false||$res<30) {
-        die("Could not write the wallet file! Please check the permissions on the current directory.\n");
-    }
-    $address=get_address($public_key);
-    echo "Your Address is: ".$address."\n";
-    echo "Your Public Key is: $public_key\n";
-    echo "Your Private Key is: $private_key\n";
-} else {
-    $wallet=trim(file_get_contents("wallet.aro"));
-    if (substr($wallet, 0, 7)!="arionum") {
-        echo "This wallet is encrypted.\n";
-        do {
-            $pass=readPasswordSilently("Password:");
-
-            $w=base64_decode($wallet);
-            $iv=substr($w, 0, 16);
- 
-
-            $enc=substr($w, 16);
-            $password = substr(hash('sha256', $pass, true), 0, 32);
-            $decrypted = openssl_decrypt(base64_decode($enc), 'aes-256-cbc', $password, OPENSSL_RAW_DATA, $iv);
-        
-            if (substr($decrypted, 0, 7)=="arionum") {
-                $wallet=$decrypted;
-                break;
-            }
-            echo "Invalid password!\n";
-        } while (1);
-    }
-    $a=explode(":", $wallet);
-    $public_key=trim($a[2]);
-    $private_key=trim($a[1]);
-
-
-    $address=get_address($public_key);
-    echo "Your address is: ".$address."\n\n";
+/**
+ * Validate transaction message
+ *
+ * @param string $message transaction message
+ *
+ * @return bool true/false
+ */
+function isValidMessage(string $message)
+{
+    $length = strlen($message);
+    if ($length > MESSAGE_MAX) return false;
+    return true;
 }
 
+/**
+ * Validate ARO alias
+ *
+ * @param string $alias ARO alias
+ *
+ * @return bool true/false
+ */
+function isValidAlias(string $alias)
+{
+    $regex = preg_match('/^[A-Z0-9]+$/', $alias);
+    $length = strlen($alias);
+    if ($length < ALIAS_CHAR_MIN) return false;
+    if ($length > ALIAS_CHAR_MAX) return false;
+    if (!$regex) return false;
 
+    return true;
+}
 
+/**
+ * Validate string as valid IP address
+ *
+ * @param string $ip_address IP address
+ *
+ * @return bool true/false
+ */
+function isValidIpAddress(string $ip_address)
+{
+    if (!filter_var($ip_address, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE|FILTER_FLAG_NO_RES_RANGE)) {
+        return false;
+    }
+    return true;
+}
 
+/**
+ * Validate peer url as valid url w/ schema
+ *
+ * @param string $peer_url peer url
+ *
+ * @return bool true/false
+ */
+function isValidPeer(string $peer_url)
+{
+    if (!filter_var($peer_url, FILTER_VALIDATE_URL, FILTER_FLAG_SCHEME_REQUIRED)) {
+        return false;
+    }
+    return true;
+}
 
-if ($arg1=="balance") {
-    if (!empty($arg2)) {
-        echo "Checking balance of the specified address: {$arg2}" . PHP_EOL;
-        if (!isAddressValid($arg2)) {
-            die("Error: invalid address format." . PHP_EOL);
+/**
+ * Validate amount; shoul be float/int
+ *
+ * @param string $transaction_val transaction value/amount
+ *
+ * @return bool true/false
+ */
+function isValidAmount($transaction_val)
+{
+    if (!is_numeric($transaction_val)) return false;
+    if (!preg_match('/^[0-9.]+$/', $transaction_val)) return false;
+    return true;
+}
+
+/**
+ * Format ARO value/number and round to nearest predefined decimals
+ *
+ * @param mixed $value ARO value
+ *
+ * @return string formatted/rounded ARO value
+ */
+function formatAroValue($value)
+{
+    return number_format($value, ARO_DECIMALS, '.', '');
+}
+
+/**
+ * Create new ARO wallet
+ *
+ * @return array $wallet        ARO wallet details
+ */
+function createWallet()
+{
+    // array to store address, privkey and pubkey
+    $wallet = [];
+
+    // check if wallet exists
+    if (checkFileExists(WALLET_PATH)) {
+        $msg = msgInfo('input_overwrite_wallet'); // ??
+        $input_encrypt = readline($msg);
+        if (substr(strtolower(trim($input_encrypt)), 0, 1) == 'y') {
+            unlink($wallet_path);
+        } else {
+            $msg = msgError('aborted');
+            exitError($msg);
         }
-        $address = $arg2;
     }
-    $res=peer_post("/api.php?q=getPendingBalance", array("account"=>$address));
-    if ($res['status']!="ok") {
-        die("ERROR: $res[data]\n");
+
+    // ask user if they wish to encrypt wallet file
+    echo msgInfo('wallet_creating');
+    $msg = msgInfo('input_encrypt_wallet'); // ??
+    $input_encrypt = readline($msg);
+
+    // ask user for wallet password
+    $encrypt_it = false;
+    if (substr(strtolower(trim($input_encrypt)), 0, 1) == 'y') {
+        $password = readConfirmPassword();
+        $encrypt_it = true;
+    }
+
+    // create new wallets keys
+    $wallet = createWalletKeys();
+    if ($encrypt_it) {
+        $wallet_text = createWalletText($wallet, $encrypt_it, $password);
     } else {
-        echo "Balance: $res[data]\n";
+        $wallet_text = createWalletText($wallet);
     }
-} elseif ($arg1=="export") {
-    echo "Your Public Key is: $public_key\n";
-    echo "Your Private Key is: $private_key\n";
-} elseif ($arg1=="transactions") {
-    $res=peer_post("/api.php?q=getTransactions", array("account"=>$address));
-    if ($res['status']!="ok") {
-        die("ERROR: $res[data]\n");
+
+    // create new wallet keys failed?
+    if (strlen($wallet['private_key']) < 20 || strlen($wallet['public_key']) < 20) {
+        $msg = msgError('ec_keypair_fail');
+        exitError($msg);
     }
-    echo "ID\tTo\tType\tSum\n";
-    foreach ($res['data'] as $x) {
-        printf("%4s %4s %4s %4.f\n", $x['id'], $x['dst'], $x['type'], $x['val']);
+
+    // store wallet text to wallet filename
+    $result = file_put_contents(WALLET_PATH, $wallet_text);
+    $min_bytes = 30;
+    if ($result === false || $result < $min_bytes) { // bytes
+        $msg = msgError('write_wallet_file');
+        exitError($msg);
     }
-} elseif ($arg1=="block") {
-    $res=peer_post("/api.php?q=currentBlock");
-    if ($res['status']!="ok") {
-        die("ERROR: $res[data]\n");
+    @chmod(WALLET_PATH, FILE_PERMS);
+
+    // return wallet info
+    $wallet['address']     = $wallet['address'];
+    $wallet['public_key']  = $wallet['public_key'];
+    $wallet['private_key'] = $wallet['private_key'];
+
+    return $wallet;
+}
+
+/**
+ * Create new wallet file text from scratch
+ *
+ * @param array  $wallet     details
+ * @param bool   $encrypt_it encrypt wallet text or not
+ * @param string $password   to encrypt wallet text
+ *
+ * @return string wallet text for placement in wallet file
+ */
+function createWalletText($wallet, $encrypt_it=false, $password='')
+{
+
+    // create non encrypted wallet file text
+    $wallet_text = COIN_NAME.':'.$wallet['private_key'].':'.$wallet['public_key'];
+
+    // create encrypted wallet file text
+    if ($encrypt_it === true) {
+        $passhash = substr(hash('sha256', $password, true), 0, 32);
+        $iv = random_bytes(16);
+        $wallet_text = base64_encode(
+            $iv.base64_encode(
+                openssl_encrypt(
+                    $wallet_text,
+                    'aes-256-cbc',
+                    $passhash,
+                    OPENSSL_RAW_DATA,
+                    $iv
+                )
+            )
+        );
     }
-    foreach ($res['data'] as $x=>$l) {
-        echo "$x = $l\n";
+
+    return $wallet_text;
+}
+
+/**
+ * Create new wallet private and public keys
+ *
+ * @return array $wallet containing 2 keys and address
+ */
+function createWalletKeys()
+{
+    // create new wallet keys
+    $options = array(
+        'curve_name'       => 'secp256k1',
+        'private_key_type' => OPENSSL_KEYTYPE_EC,
+    );
+    $pkey_new = openssl_pkey_new($options);
+    openssl_pkey_export($pkey_new, $pkey_string);
+    $private_key = convertPemToKey($pkey_string);
+    $pkey_details = openssl_pkey_get_details($pkey_new);
+    $public_key = convertPemToKey($pkey_details['key']);
+
+    $address = convertPublicKeyToAddress($public_key);
+    $wallet = [
+        'address'=>$address,
+        'public_key'=>$public_key,
+        'private_key'=>$private_key
+    ];
+    return $wallet;
+}
+
+/**
+ * Open local wallet file and return information
+ *
+ * @return array of wallet keys and address
+ */
+function openWallet()
+{
+    $wallet = [];
+    // Retrieve wallet text file
+    $wallet_text = trim(file_get_contents(WALLET_PATH));
+
+    // check if wallet file appears encrypted; if first part of string containc coin name
+    $wallet_appears_encrypted = true;
+    if (substr($wallet_text, 0, strlen(COIN_DEFAULT)) == COIN_DEFAULT) {
+        $wallet_appears_encrypted = false;
     }
-} elseif ($arg1=="decrypt") {
-    $wallet="arionum:$private_key:$public_key";
-    $res=file_put_contents("wallet.aro", $wallet);
-    if ($res===false||$res<30) {
-        echo "Your Public Key is: $public_key\n";
-        echo "Your Private Key is: $private_key\n";
-        die("Could not write the wallet file! Please check the permissions on the current directory and save a backup of the above keys.\n");
+    if (substr($wallet_text, 0, strlen(COIN_NAME)) == COIN_NAME) {
+        $wallet_appears_encrypted = false;
     }
-    echo "The wallet has been decrypted!\n";
-} elseif ($arg1=="encrypt") {
+    // open encrypted wallet with password
+    if ($wallet_appears_encrypted) {
+        echo msgInfo('wallet_encrypted_notice');
+        do {
+            // ask user for password
+            $password = readPasswordSilently('Enter Password:');
+            // decode wallet using the password
+            $w = base64_decode($wallet_text);
+            $iv = substr($w, 0, 16);
+
+            $enc = substr($w, 16);
+            $pword = substr(hash('sha256', $password, true), 0, 32);
+            $decrypted = openssl_decrypt(base64_decode($enc), 'aes-256-cbc', $pword, OPENSSL_RAW_DATA, $iv);
+
+            if (substr($decrypted, 0, $coin_length) == COIN_NAME) {
+                $wallet_text = $decrypted;
+                break;
+            }
+            echo msgInfo('password_invalid');
+        } while (1);
+    }
+
+    $wallet_text_split     = explode(':', $wallet_text);
+    $wallet['public_key']  = trim($wallet_text_split[2]);
+    $wallet['private_key'] = trim($wallet_text_split[1]);
+    $wallet['address']     = convertPublicKeyToAddress($wallet['public_key']);
+
+    return $wallet;
+}
+
+/**
+ * Get ARO wallet balance
+ *
+ * @param string $wallet_address Specific wallet address
+ *
+ * @return float|bool of balance or false if fail; API call data response
+ */
+function getBalance($wallet_address)
+{
+    // validate wallet address
+    if (!isValidAddress($wallet_address)) {
+        return -1;
+    }
+
+    $result = postPeer('/api.php?q=getBalance', array('account' => $wallet_address));
+    // if not ok; return false
+    if (!isset($result['status']) || $result['status'] != 'ok') {
+        return -1;
+    }
+
+    $balance = round($result['data'], ARO_DECIMALS);
+    return $balance;
+}
+
+/**
+ * Get ARO wallet balance (with pending transactions)
+ *
+ * @param string $wallet_address Specific wallet address
+ *
+ * @return float|bool of balance or false if fail; API call data response
+ */
+function getPendingBalance($wallet_address)
+{
+    // validate wallet address
+    if (!isValidAddress($wallet_address)) {
+        return -1;
+    }
+
+    $result = postPeer('/api.php?q=getPendingBalance', array('account' => $wallet_address));
+    // if not ok; return false
+    if (!isset($result['status']) || $result['status'] != 'ok') {
+        return -1;
+    }
+
+    $balance = round($result['data'], ARO_DECIMALS);
+    return $balance;
+}
+
+/**
+ * Get ARO wallet transaction info
+ *
+ * @param string $transaction_id to retreive
+ *
+ * @return array $transaction info
+ */
+function getTransaction($transaction_id)
+{
+    // call API from one of the peers
+    $result = postPeer('/api.php?q=getTransaction', array('transaction' => $transaction_id));
+    // if no ok; return false
+    if (!isset($result['status']) || $result['status'] != 'ok') {
+        return false;
+    }
+    $transaction = $result['data'];
+    return $transaction;
+}
+
+/**
+ * Get ARO wallet transaction list
+ *
+ * @param string $address ARO wallet address
+ * @param int    $limit   max transactions to return
+ *
+ * @return array $transactions
+ */
+function getTransactions($address, $limit = 10)
+{
+    $transactions = [];
+    // call API from one of the peers
+    $result = postPeer(
+        '/api.php?q=getTransactions',
+        array(
+            'account' => $address,
+            'limit' => (int)$limit
+        )
+    );
+    // if no ok; return false
+    if (!isset($result['status']) || $result['status'] != 'ok') {
+        return false;
+    }
+    foreach ($result['data'] as $transaction) {
+        $id = $transaction['id'];
+        $transactions[$id] = $transaction;
+    }
+    return $transactions;
+}
+
+/**
+ * Return a list of items for display
+ *
+ * @param string $command eg. wallets
+ *
+ * @return array of items
+ */
+function listItems($command)
+{
+    $items = [];
+    switch ($command) {
+    case 'wallets':
+        $items = glob(DIR_WALLET.'/*.aro');
+        foreach ($items as $key => $value) {
+            $items[$key] = str_replace(DIR_WALLET.'/', '', $value);
+        }
+        break;
+
+    default:
+        return $items;
+        break;
+    }
+    sort($items);
+    return $items;
+}
+
+/**
+ * Get current block information
+ *
+ * @return array
+ */
+function getCurrentBlock()
+{
+    $block = false;
+    // call API from one of the peers
+    $result = postPeer('/api.php?q=currentBlock');
+    // if no ok; return false
+    if (!isset($result['status']) || $result['status'] != 'ok') {
+        return false;
+    }
+    if (isset($result['data']) && isset($result['data']['height'])) {
+        return $result['data'];
+    }
+    return false;
+}
+
+/**
+ * Decrypt ARO wallet and store wallet info without encryption
+ *
+ * @param array $wallet ARO wallet details; priv key and pub key
+ *
+ * @return bool
+ */
+function decryptWallet($wallet)
+{
+    // 'arionum:PRIVKEY:PUBKEY'
+    $wallet_text = COIN_NAME.':'.$wallet['private_key'].':'.$wallet['public_key'];
+    $result = file_put_contents(WALLET_PATH, $wallet_text);
+    $min_bytes = 30;
+    if ($result === false || $result < $min_bytes) { // 30 = check bytes returned
+        return false;
+    }
+    @chmod(WALLET_PATH, FILE_PERMS);
+    return true;
+}
+
+/**
+ * Encrypt ARO wallet and store wallet info with encryption
+ *
+ * @param array  $wallet         ARO wallet details; priv key and pub key
+ * @param string $input_password ARO wallet user's password
+ *
+ * @return bool
+ */
+function encryptWallet($wallet, $input_password)
+{
+    // 'arionum:PRIVKEY:PUBKEY'
+    $wallet_text = COIN_NAME.':'.$wallet['private_key'].':'.$wallet['public_key'];
+    $pword = substr(hash('sha256', $input_password, true), 0, 32);
+    $iv = random_bytes(16);
+    $wallet_text_encrypted = base64_encode(
+        $iv.base64_encode(
+            openssl_encrypt(
+                $wallet_text,
+                'aes-256-cbc',
+                $pword,
+                OPENSSL_RAW_DATA,
+                $iv
+            )
+        )
+    );
+    $result = file_put_contents(WALLET_PATH, $wallet_text_encrypted);
+    $min_bytes = 30;
+    if ($result === false || $result < $min_bytes) { // check bytes returned
+        return false;
+    }
+    @chmod(WALLET_PATH, FILE_PERMS);
+    return true;
+}
+
+/**
+ * Read password and confirm password from user input
+ *
+ * @return string $password
+ */
+function readConfirmPassword()
+{
+    $password = '';
     do {
-        $pass=readPasswordSilently("Password:");
-        if (strlen($pass)<8) {
-            echo "The password must be at least 8 characters long\n";
+        // Ask wallet password
+        $input_password1 = readPasswordSilently('  Enter Password:');
+        if (strlen($input_password1) < PASSWORD_MIN) {
+            echo msgInfo('password_min');
             continue;
         }
-        $pass2=readPasswordSilently("Confirm Password:");
-        if ($pass==$pass2) {
+        // Confirm password input
+        $input_password2 = readPasswordSilently('Confirm Password:');
+        if ($input_password1 == $input_password2) {
+            $password = $input_password1;
             break;
         } else {
-            echo "The passwords did not match!\n";
+            echo msgInfo('password_mismatch');
+            continue;
         }
     } while (1);
-    $wallet="arionum:$private_key:$public_key";
-    $password = substr(hash('sha256', $pass, true), 0, 32);
-    $iv=random_bytes(16);
-    $wallet = base64_encode($iv.base64_encode(openssl_encrypt($wallet, 'aes-256-cbc', $password, OPENSSL_RAW_DATA, $iv)));
-    $res=file_put_contents("wallet.aro", $wallet);
-    if ($res===false||$res<30) {
-        echo "Your Public Key is: $public_key\n";
-        echo "Your Private Key is: $private_key\n";
-        die("Could not write the wallet file! Please check the permissions on the current directory and save a backup of the above keys.\n");
-    }
-} elseif ($arg1=="transaction") {
-    $res=peer_post("/api.php?q=getTransaction", array("transaction"=>$arg2));
-    if ($res['status']!="ok") {
-        die("ERROR: $res[data]\n");
-    }
-    foreach ($res['data'] as $x=>$l) {
-        echo "$x = $l\n";
-    }
-} elseif ($arg1=='send') {
-    if (empty($arg2)) {
-        die("ERROR: Invalid destination address");
-    }
-    if (empty($arg3)) {
-        die("ERROR: Invalid sum");
-    }
-
-    $res=peer_post("/api.php?q=getPendingBalance", array("account"=>$address));
-    if ($res['status']!="ok") {
-        die("ERROR: $res[data]\n");
-    }
-    $balance=$res['data'];
-    $fee=$arg3*0.0025;
-    if ($fee<0.00000001) {
-        $fee=0.00000001;
-    }
-    if ($fee>10) {
-        $fee=10;
-    }
-    $total=$arg3+$fee;
-    
-    $val=number_format($arg3, 8, ".", "");
-    $fee=number_format($fee, 8, ".", "");
-    if ($balance<$total) {
-        die("ERROR: Not enough funds in balance\n");
-    }
-    $date=time();
-    $info=$val."-".$fee."-".$arg2."-".$arg4."-1-".$public_key."-".$date;
-    $signature=ec_sign($info, $private_key);
-    
-
-    $res=peer_post("/api.php?q=send", array("dst"=>$arg2,"val"=>$val, "signature"=>$signature, "public_key"=>$public_key, "version"=>1, "message"=>$arg4, "date"=>$date));
-
-    if ($res['status']!="ok") {
-        die("ERROR: $res[data]\n");
-    } else {
-        echo "Transaction sent! Transaction id: $res[data]\n";
-    }
-} elseif (strtolower($arg1)=='alias') {
-    if (empty($arg4)&&$arg2=="send") {
-        die("ERROR: Invalid sum");
-    }
-
-
-    if (empty($arg3)) {
-        die("ERROR: Invalid destination alias");
-    }
-
-
-    $arg3=preg_replace("/[^a-zA-Z0-9]/", "", $arg3);
-    $arg3=strtoupper($arg3);
-    if (strlen($arg3)<4||strlen($arg3)>25) {
-        die("ERROR: Invalid destination alias! #WALLET");
-    }
-
-    $res=peer_post("/api.php?q=getPendingBalance", array("account"=>$address));
-    if ($res['status']!="ok") {
-        die("ERROR: $res[data]\n");
-    }
-    $balance=$res['data'];
-    $fee=$arg4*0.0025;
-    if ($fee<0.00000001) {
-        $fee=0.00000001;
-    }
-    if ($fee>10) {
-        $fee=10;
-    }
-    if ($arg2=="set") {
-        $fee=10;
-        $arg4=0.00000001;
-    }
-    $total=$arg4+$fee;
-    
-    $val=number_format($arg4, 8, ".", "");
-    $fee=number_format($fee, 8, ".", "");
-    if ($balance<$total) {
-        die("ERROR: Not enough funds in balance\n");
-    }
-    $date=time();
-    if ($arg2=="set") {
-        $dst=$address;
-        $msg=$arg3;
-        $version=3;
-    } else {
-        $msg=$arg5;
-        $dst=$arg3;
-        $version=2;
-    }
-    
-    $info=$val."-".$fee."-".$dst."-".$msg."-".$version."-".$public_key."-".$date;
-    
-    $signature=ec_sign($info, $private_key);
-
-
-
-    $res=peer_post("/api.php?q=send", array("dst"=>$dst,"val"=>$val, "signature"=>$signature, "public_key"=>$public_key, "version"=>$version, "message"=>$msg, "date"=>$date));
-
-    if ($res['status']!="ok") {
-        die("ERROR: $res[data]\n");
-    } else {
-        echo "Transaction sent! Transaction id: $res[data]\n";
-    }
-} elseif (strtolower($arg1)=='masternode') {
-    if (empty($arg2)) {
-        die("ERROR: Invalid masternode command");
-    }
-        
-    $msg="";
-    if ($arg2=="create") {
-        $val=100000;
-        $fee=10;
-        $version=100;
-        $arg3=preg_replace("/[^0-9\.]/", "", $arg3);
-        
-        if (!filter_var($arg3, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE|FILTER_FLAG_NO_RES_RANGE)) {
-            die("ERROR: Invalid IP - $arg3");
-        }
-        $msg=$arg3;
-    } else {
-        $val=0.00000001;
-        $fee=0.00000001;
-        if ($arg2=="pause") {
-            $version=101;
-        } elseif ($arg2=="resume") {
-            $version=102;
-        } elseif ($arg2=="release") {
-            $version=103;
-        } else {
-            die("ERROR: Invalid masternode command");
-        }
-    }
-
-    $res=peer_post("/api.php?q=getPendingBalance", array("account"=>$address));
-    if ($res['status']!="ok") {
-        die("ERROR: $res[data]\n");
-    }
-    $balance=$res['data'];
-        
-    $total=$val+$fee;
-        
-    $val=number_format($val, 8, ".", "");
-    $fee=number_format($fee, 8, ".", "");
-    if ($balance<$total) {
-        die("ERROR: Not enough funds in balance\n");
-    }
-    $date=time();
-    $info=$val."-".$fee."-".$address."-".$msg."-$version-".$public_key."-".$date;
-       
-    $signature=ec_sign($info, $private_key);
-        
-    
-    $res=peer_post("/api.php?q=send", array("dst"=>$address,"val"=>$val, "signature"=>$signature, "public_key"=>$public_key, "version"=>$version, "message"=>$msg, "date"=>$date));
-    
-    if ($res['status']!="ok") {
-        die("ERROR: $res[data]\n");
-    } else {
-        echo "Masternode command sent! Transaction id: $res[data]\n";
-    }
-} else {
-    echo "Invalid command\n";
+    return $password;
 }
+
+/**
+ * Create transaction string for use with signing
+ *
+ * @param array $string_data to merge into string
+ *
+ * @return string in plain text
+ */
+function createTransactionString($string_data)
+{
+    $string_format = '%s-%s-%s-%s-%d-%s-%d';
+    // order is vital; do NOT change order
+    $transaction_string = sprintf(
+        $string_format,
+        $string_data['val'], // transaction value eg 112.25
+        $string_data['fee'], // transaction fee eg. 0.25
+        $string_data['dst'], // dst = destination wallet address eg. 'AsDfG....Sdfr'
+        $string_data['message'], // 'some message'
+        $string_data['version'], // transaction type code: 1,2,3,100,etc.
+        $string_data['public_key'], // 'AsDfGhJkL'
+        $string_data['date'] // 1535177551
+    );
+    return $transaction_string;
+}
+
+/**
+ * Send ARO coin(s) to another address or ALIAS
+ *
+ * @param array     $wallet          ARO wallet details
+ * @param string    $to_address      ARO address (or ALIAS) destination
+ * @param float|int $transaction_val ARO value
+ * @param string    $message         message (optional)
+ *
+ * @return string $tid transaction id
+ */
+function runSendTransaction($wallet, $to_address, $transaction_val, $message='')
+{
+    // required fields
+    if (!is_array($wallet)) return false;
+    if (!isset($wallet['address'])) return false;
+    if (!isset($wallet['public_key'])) return false;
+    if (!isset($wallet['private_key'])) return false;
+    if (empty($to_address)) return false;
+    if (empty($transaction_val)) return false;
+
+    // Check length of address; if it is an ALIAS set correct $version (TRANSACTION_CODE)
+    $version = TRANSACTION_CODE_SEND;
+    if (strlen($to_address) <= ALIAS_CHAR_MAX && isValidAlias($to_address)) {
+        $version = TRANSACTION_CODE_ALIAS_SEND;
+    }
+
+    // get pending balance of account
+    $balance = getPendingBalance($wallet['address']);
+    // did we get response from api?
+    if ($balance < 0) {
+        $msg = msgError('api_no_response');
+        exitError($msg);
+    }
+    // calculate fee and total
+    $transaction_fee = calculateTransactionFee($transaction_val, TRANSACTION_FEE_PCT);
+    $total = $transaction_val + $transaction_fee;
+    // check enough balance
+    if ($balance < $total ) {
+        $msg = msgError('not_enough_funds', $balance);
+        exitError($msg);
+    }
+
+    // create transaction signature
+    $unixtime = time();
+    $transaction_val = formatAroValue($transaction_val);
+    $transaction_fee = formatAroValue($transaction_fee);
+    $string_data = array(
+        'val'        => $transaction_val,
+        'fee'        => $transaction_fee,
+        'dst'        => $to_address, // dst=destination address
+        'message'    => $message,
+        'version'    => $version,
+        'public_key' => $wallet['public_key'],
+        'date'       => $unixtime
+    );
+
+    $transaction_string = createTransactionString($string_data);
+    $signature = ecSign($transaction_string, $wallet['private_key']);
+
+    // create transaction details
+    $transaction_info = array(
+        'val'        => $transaction_val,
+        'dst'        => $to_address, // destination address
+        'signature'  => $signature,
+        'message'    => $message,
+        'version'    => $version,
+        'public_key' => $wallet['public_key'],
+        'date'       => $unixtime
+    );
+
+    // DEBUG
+    //print "TRANSACTION STRING: $transaction_string\n";
+    //print "SIGNATURE: $signature\n";
+    //print_r($string_data);
+    //print_r($transaction_info);
+
+    // send the transaction
+    $result = postSendTransaction($transaction_info);
+    // did we get response from api?
+    if (!$result || !is_array($result) || !isset($result['status'])) {
+        $msg = msgError('api_no_response');
+        exitError($msg);
+    }
+
+    // check response status
+    $status = (string)$result['status'];
+    switch ($status) {
+    case 'ok':
+        echo msgInfo('transaction_sent', (string)$result['data']);
+        break;
+    case 'error':
+        $msg = msgError('api_response', (string)$result['data']);
+        exitError($msg);
+        break;
+    default:
+        $msg = msgError('api_no_response');
+        exitError($msg);
+        break;
+    }
+    return true;
+}
+
+/**
+ * Set alias on the account/wallet address
+ *
+ * @param array  $wallet  ARO wallet details
+ * @param string $command command to run
+ * @param string $alias   alias to set address to
+ *
+ * @return bool
+ */
+function runAlias($wallet, $command, $alias)
+{
+    // API call to peers; Get account's pending balance
+    $balance = getPendingBalance($wallet['address']);
+    // did we get response from api?
+    if ($balance < 0) {
+        $msg = msgError('api_no_response');
+        exitError($msg);
+    }
+
+    // alias commands
+    switch($command) {
+    case 'set':
+        // validate alias name rules
+        if (empty(trim($alias))) {
+            $msg = msgError('missing_alias');
+            exitError($msg);
+        }
+        // can only contain A-Z and 0-9
+        $alias = strtoupper($alias);
+        if (!isValidAlias($alias)) {
+            $msg = msgError('invalid_alias');
+            exitError($msg);
+        }
+
+        $transaction_val = TRANSACTION_FEE_MIN;
+        $transaction_fee = ALIAS_FEE;
+        $total = $transaction_val + $transaction_fee;
+        // required to prevent scientific notation
+        $transaction_val = formatAroValue($transaction_val);
+        $transaction_fee = formatAroValue($transaction_fee);
+        // insufficient balance for fee
+        if ($balance < $total) {
+            $msg = msgError('not_enough_funds');
+            exitError($msg);
+        }
+        $version = TRANSACTION_CODE_ALIAS_SET;
+        break;
+    default:
+        $msg = msgError('invalid_command');
+        exitError($msg);
+        break;
+    }
+
+    // create transaction signature
+    $unixtime = time();
+    $string_data = array(
+        'val'        => $transaction_val,
+        'fee'        => $transaction_fee,
+        'dst'        => $wallet['address'],
+        'message'    => $alias,
+        'version'    => $version, // transaction_code ie. 1,2,3,100,101,102
+        'public_key' => $wallet['public_key'],
+        'date'       => $unixtime
+    );
+    $transaction_string = createTransactionString($string_data);
+    $signature = ecSign($transaction_string, $wallet['private_key']);
+
+    // create transaction details
+    $transaction_info = array(
+        'val'        => $transaction_val,
+        'dst'        => $wallet['address'], // destination address
+        'signature'  => $signature,
+        'message'    => $alias,
+        'version'    => $version, // transaction_code ie. 1,2,3,100,101,102
+        'public_key' => $wallet['public_key'],
+        'date'       => $unixtime
+    );
+
+    // DEBUG
+    //print "TRANSACTION STRING: $transaction_string\n";
+    //print "SIGNATURE: $signature\n";
+    //print_r($string_data);
+    //print_r($transaction_info);
+
+
+    // send the transaction
+    $result = postSendTransaction($transaction_info);
+    // did we get response from api?
+    if (!$result || !is_array($result) || !isset($result['status'])) {
+        $msg = msgError('api_no_response');
+        exitError($msg);
+    }
+
+    // check response status
+    $status = (string)$result['status'];
+    switch ($status) {
+    case 'ok':
+        echo msgInfo('transaction_sent', (string)$result['data']);
+        break;
+    case 'error':
+        $msg = msgError('api_response', (string)$result['data']);
+        exitError($msg);
+        break;
+    default:
+        $msg = msgError('api_no_response');
+        exitError($msg);
+        break;
+    }
+    return true;
+}
+
+/**
+ * Execute masternode commands
+ *
+ * @param array  $wallet     ARO wallet details
+ * @param stirng $command    Command
+ * @param string $ip_address Node IP address
+ *
+ * @return string           result message
+ */
+function runMasternode($wallet, $command, $ip_address)
+{
+    // masternode commands
+    switch($command) {
+    case 'create':
+        if (!isValidIpAddress($ip_address)) {
+            $msg = msgError('invalid_ip', $ip_address);
+            exitError($msg);
+        }
+        $transaction_val = MASTERNODE_COST;
+        $transaction_fee = MASTERNODE_FEE;
+        $version         = TRANSACTION_CODE_MN_CREATE;
+        $message         = $ip_address;
+        break;
+    case 'pause':
+        $transaction_val = TRANSACTION_FEE_MIN;
+        $transaction_fee = TRANSACTION_FEE_MIN;
+        $version         = TRANSACTION_CODE_MN_PAUSE;
+        break;
+    case 'resume':
+        $transaction_val = TRANSACTION_FEE_MIN;
+        $transaction_fee = TRANSACTION_FEE_MIN;
+        $version         = TRANSACTION_CODE_MN_RESUME;
+        break;
+    case 'release':
+        $transaction_val = TRANSACTION_FEE_MIN;
+        $transaction_fee = TRANSACTION_FEE_MIN;
+        $version         = TRANSACTION_CODE_MN_RELEASE;
+        break;
+    default:
+        $msg = msgError('invalid_masternode_cmd');
+        exitError($msg);
+        break;
+    }
+
+    // check user has enough (pending) balance
+    $balance = getPendingBalance($wallet['address']);
+    // did we get response from api?
+    if ($balance < 0) {
+        $msg = msgError('api_no_response');
+        exitError($msg);
+    }
+    $total           = $transaction_val + $transaction_fee;
+    $transaction_val = formatAroValue($transaction_val);
+    $transaction_fee = formatAroValue($transaction_fee);
+    if ($balance < $total) {
+        $msg = msgError('not_enough_funds');
+        exitError($msg);
+    }
+
+    // create transaction signature
+    $unixtime = time();
+    $string_data = array(
+        'val'        => $transaction_val,
+        'fee'        => $transaction_fee,
+        'dst'        => $wallet['address'],
+        'message'    => $ip_address, // message = ip address on all masternode commands
+        'version'    => $version, // transaction_code ie. 1,2,3,100,101,102
+        'public_key' => $wallet['public_key'],
+        'date'       => $unixtime
+    );
+    $transaction_string = createTransactionString($string_data);
+    $signature = ecSign($transaction_string, $wallet['private_key']);
+
+    // create transaction details
+    $transaction_info = array(
+        'val'        => $transaction_val,
+        'dst'        => $wallet['address'],
+        'signature'  => $signature,
+        'message'    => $ip_address, // message = ip address on all masternode commands
+        'version'    => $version, // transaction_code ie. 1,2,3,100,101,102
+        'public_key' => $wallet['public_key'],
+        'date'       => $unixtime
+    );
+
+    // DEBUG
+    //print "TRANSACTION STRING: $transaction_string\n";
+    //print "SIGNATURE: $signature\n";
+    //print_r($string_data);
+    //print_r($transaction_info);
+
+    // send the transaction
+    $result = postSendTransaction($transaction_info);
+    // did we get response from api?
+    if (!$result || !is_array($result) || !isset($result['status'])) {
+        $msg = msgError('api_no_response');
+        exitError($msg);
+    }
+
+    // check response status
+    $status = (string)$result['status'];
+    switch ($status) {
+    case 'ok':
+        echo msgInfo('transaction_sent', (string)$result['data']);
+        break;
+    case 'error':
+        $msg = msgError('api_response', (string)$result['data']);
+        exitError($msg);
+        break;
+    default:
+        $msg = msgError('api_no_response');
+        exitError($msg);
+        break;
+    }
+    return true;
+}
+
+/**
+ * API call to send a transaction
+ *
+ * @param array $transaction_info Transaction details
+ *
+ * @return exit|array Result of API response
+ */
+function postSendTransaction($transaction_info)
+{
+    $result = postPeer('/api.php?q=send', $transaction_info);
+    return $result;
+}
+
+/**
+ * Calculate appropriate fee in ARO
+ *
+ * @param int|float $transaction_val Base amount
+ * @param int|float $factor          Multiplying factor
+ *
+ * @return $transaction_fee Final fee in ARO
+ */
+function calculateTransactionFee($transaction_val, $factor=0)
+{
+    $transaction_fee = ($factor !== 0) ? $transaction_val * $factor : $transaction_val;
+
+    // Set min fee
+    if ($transaction_fee < TRANSACTION_FEE_MIN) {
+        $transaction_fee = TRANSACTION_FEE_MIN;
+    }
+    // Set max fee
+    if ($transaction_fee > TRANSACTION_FEE_MAX) {
+        $transaction_fee = TRANSACTION_FEE_MAX;
+    }
+
+    return round($transaction_fee, ARO_DECIMALS);
+}
+
+/**
+ * Return a line to print to screen; organize all printed informational lines here
+ *
+ * @param string $case type of line to print
+ * @param mixed  $data array of data needed for line
+ *
+ * @return string to print
+ */
+function msgInfo($case, $data='')
+{
+    if (!is_array($data)) {
+        $data = (string)$data;
+    }
+    switch ($case) {
+    case 'address':
+        $str = "    Address: ".$data['address']."\n";
+        break;
+    case 'balance':
+        $str = "    Balance: ".formatAroValue($data)."\n";
+        break;
+    case 'balancepending':
+        $str = "    Balance: ". formatAroValue($data)." (pending confirmations)\n";
+        break;
+    case 'balance_checking':
+        $str = "Checking balance of the specified address: $data.\n";
+        break;
+    case 'block_current':
+        $str = "Could not retrieve block information from this peer. Is it down?\n";
+        if ($data) {
+            $str = '';
+            $mask = "| %12s: %s\n";
+            $str .= "\n".sprintf($mask, 'KEY', 'VALUE');
+            foreach ($data as $key => $value) {
+                $str .= sprintf($mask, $key, $value);
+            }
+        }
+        break;
+    case 'conf_set_success':
+        $str = "Config set successfully.\n";
+        break;
+    case 'custom':
+        $str = $data."\n";
+        break;
+    case 'input_overwrite_wallet':
+        $str = WALLET_PATH." exists already. Do you wish to OVERWRITE this wallet? (y/N): "; // no newline
+        break;
+    case 'input_encrypt_wallet':
+        $str = "Would you like to encrypt this wallet with a password? (y/N): "; // no newline
+        break;
+    case 'items':
+        $str = "No items found.\n";
+        if (count($data)>0) {
+            $mask = "| %s \n";
+            $item_count = count($data);
+            $str = "\nDISPLAYING $item_count ITEM(S) ...\n";
+            foreach ($data as $key=>$value) { // $t=transaction array
+                $str .= sprintf($mask, $value);
+            }
+            $str .= "DISPLAYED $item_count ITEM(S).\n\n";
+        }
+        break;
+    case 'masternode_cmd_sent':
+        $str = "Masternode command sent.\nTransaction id: $data\n";
+        break;
+    case 'public_key':
+        $str = " Public key: ".$data['public_key']."\n";
+        break;
+    case 'private_key':
+        $str = "Private key: ".$data['private_key']."\n";
+        break;
+    case 'private_key_hidden':
+        $str = "Private key: HIDDEN (use export command to view)\n";
+        break;
+    case 'password_invalid':
+        $str = "Invalid password.\n";
+        break;
+    case 'password_min':
+        $str = "Password must be at least ".PASSWORD_MIN." characters long.\n";
+        break;
+    case 'password_mismatch':
+        $str = "Passwords did not match.\n";
+        break;
+    case 'transaction_sent':
+        $str = "Transaction sent.\nTransaction id: $data\n";
+        break;
+    case 'transaction':
+        $str = "No transactions found on this peer. Is peer synced? Wallet new?\n";
+        if (count($data)>0) {
+            $mask = "| %14s: %s\n";
+            $str = "\n".sprintf($mask, 'KEY', 'VALUE');
+            foreach ($data as $k=>$v) { // $t=transaction array
+                $str .= sprintf($mask, $k, $v);
+            }
+        }
+        break;
+    case 'transactions':
+        $str = "No transactions found on this peer. Is peer synced?\n";
+        if (count($data)>0) {
+            $mask = "| %14s: %s \n";
+            $transactions_count = count($data);
+            $str = "\nDISPLAYING $transactions_count TRANSACTION(S) ...\n";
+            foreach ($data as $t) { // $t=transaction array
+                $str .= sprintf($mask, 'tid', $t['id']);
+                $str .= sprintf($mask, 'date', date('Y-m-d H:i:s T', $t['date']));
+                $str .= sprintf($mask, 'from(src)', $t['src']);
+                $str .= sprintf($mask, 'to(dst)', $t['dst']);
+                $str .= sprintf($mask, 'amount(val)', $t['val']);
+                $str .= sprintf($mask, 'fee', $t['fee']);
+                $str .= sprintf($mask, 'type', $t['type']);
+                $str .= sprintf($mask, 'confirmations', $t['confirmations']);
+                $str .= sprintf($mask, 'message', $t['message']);
+                $str .= "--------------------------------\n";
+            }
+            $str .= "DISPLAYED $transactions_count TRANSACTION(S).\n\n";
+        }
+        break;
+    case 'wallet_creating':
+        $str = "Generating new ".WALLET_NAME." file ...\n";
+        break;
+    case 'wallet_decrypting':
+        $str = "Decrypting wallet: ".$data['address']." ...\n";
+        break;
+    case 'wallet_encrypting':
+        $str = "Encrypting wallet: ".$data['address']." ...\n";
+        break;
+    case 'wallet_decrypted_success':
+        $str = "Wallet successfully decrypted.\n";
+        break;
+    case 'wallet_encrypted_success':
+        $str = "Wallet successfully encrypted.\n";
+        break;
+    case 'wallet_encrypted_notice':
+        $str = "Wallet is encrypted.\n";
+        break;
+    case 'with_network':
+        $str = "    Network: $data\n";
+        break;
+    case 'with_peer':
+        $str = "       Peer: $data\n";
+        break;
+    case 'with_wallet':
+        $str = "     Wallet: $data\n";
+        break;
+    default:
+        $str = '';
+        break;
+    }
+    return $str;
+}
+
+/**
+ * Return an error to print to screen; organize all printed errors here
+ *
+ * @param string $case type of line to print
+ * @param mixed  $data array of data needed for 2nd message/line
+ *
+ * @return string to print
+ */
+function msgError($case, $data='')
+{
+    $prefix='ERROR: ';
+
+    if (!is_array($data)) {
+        $data = (string)$data;
+    }
+    switch ($case) {
+    case 'aborted':
+        $str = $prefix."Aborted.\n";
+        break;
+    case 'api_response':
+        $str = $prefix."API response => ".$data."\n";
+        break;
+    case 'api_no_response':
+        $str = $prefix."No response from peer API. Check account/balance/peer/mempool. Then try again?\n";
+        break;
+    case 'conf_set_fail':
+        $str = $prefix."Config set failed. Invalid value or command.\n";
+        break;
+    case 'custom':
+        $str = $prefix.$data."\n";
+        break;
+    case 'ec_keypair_fail':
+        $str = $prefix."Could not generate EC key pair. Please check openssl installation.\n";
+        break;
+    case 'invalid_address':
+        $str = $prefix."Invalid wallet address.\n";
+        break;
+    case 'invalid_alias':
+        $str = $prefix."Invalid ALIAS. Must be all CAPS. Min/Max Length: ".ALIAS_CHAR_MIN."-".ALIAS_CHAR_MAX."\n";
+        break;
+    case 'invalid_amount':
+        $str = $prefix."Invalid amount.\n";
+        break;
+    case 'invalid_command':
+        $str = $prefix."Invalid command. Try: php ".basename(__FILE__)." --help\n";
+        break;
+    case 'invalid_dest_alias':
+        $str = $prefix."Invalid destination alias.\n";
+        break;
+    case 'invalid_ip':
+        $str = $prefix."Invalid IP address.\n";
+        break;
+    case 'invalid_network_name':
+        $str = $prefix."Invalid network name entered.\n";
+        break;
+    case 'invalid_peer_url':
+        $str = $prefix."Invalid peer url entered.\n";
+        break;
+    case 'invalid_masternode_cmd':
+        $str = $prefix."Invalid masternode command.\n";
+        break;
+    case 'invalid_message_length':
+        $str = $prefix."Message length must be less than ".TRANSACTION_MSG_MAX." characters.\n";
+        break;
+    case 'invalid_peer':
+        $str = $prefix."Peer url appears to be invalid. Check ".CACHE_PEERS." or ".CONF_PEERS."\n";
+        break;
+    case 'invalid_wallet_name':
+        $str = $prefix."Invalid wallet name entered. Must contain .aro\n";
+        break;
+    case 'not_enough_funds':
+        $str = $prefix."Not enough funds available in balance. Peer is reporting balance of ".$data.". If incorrect, try another peer.\n";
+        break;
+    case 'missing_alias':
+        $str = $prefix."Alias argument missing.\n";
+        break;
+    case 'prerequisites':
+        $str = $prefix."You are missing prerequisite(s): ";
+        if (count($data)>0) {
+            foreach ($data as $value) {
+                $str .= "$value ";
+            }
+        }
+        $str .= "\n";
+        break;
+    case 'write_directory':
+        $str = $prefix."Could not create directory. Please check write permissions on the current directory.\n";
+        break;
+    case 'write_file':
+        $str = $prefix."Could not create/write to file. Please check write permissions on the current directory.\n";
+        break;
+    case 'write_wallet_file':
+        $str = $prefix."Could not write to wallet file. Please check write permissions on the current directory.\n";
+        break;
+    default:
+        $str = '';
+        break;
+    }
+
+    return $str."\n";
+}
+
+/**
+ * Exit error response code with error message.
+ *
+ * @param string $msg message to output
+ *
+ * @return bool
+ */
+function exitError($msg='')
+{
+    fwrite(STDERR, $msg);
+    exit(1);
+
+    return false;
+}
+
