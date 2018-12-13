@@ -12,22 +12,22 @@ light-arionum-cli [command] [options]
 
 ## Commands
 
-Command                           | Description
---------------------------------- | ------------------
-`balance`                         | Prints the balance
-`export`                          | Prints the wallet data
-`block`                           | Show data about the current block
-`encrypt`                         | Encrypts the wallet
-`decrypt`                         | Decrypts the wallet
-`transactions`                    | Show the latest transactions
-`transaction [id]`                | Shows data about a specific transaction
-`send [address] [value] [message]`| Sends a transaction (message optional)
-`alias send [alias] [message]`    | Sends a transaction to an alis (message optional)
-`alias set [alias]`               | Set your alias to the specified value
-`masternode create [ip]`          | Send a masternode announcement transaction
-`masternode pause`                | Pause the masternode
-`masternode resume`               | Resume the masternode
-`masternode release`              | Close the masternode and return the funds
+Command                                | Description
+-------------------------------------- | ------------------
+`balance`                              | Prints the balance
+`export`                               | Prints the wallet data
+`block`                                | Show data about the current block
+`encrypt`                              | Encrypts the wallet
+`decrypt`                              | Decrypts the wallet
+`transactions`                         | Show the latest transactions
+`transaction [id]`                     | Shows data about a specific transaction
+`send [address] [value] [message]`     | Sends a transaction (message optional)
+`alias send [alias] [value] [message]` | Sends a transaction to an alis (message optional)
+`alias set [alias]`                    | Set your alias to the specified value
+`masternode create [ip]`               | Send a masternode announcement transaction
+`masternode pause`                     | Pause the masternode
+`masternode resume`                    | Resume the masternode
+`masternode release`                   | Close the masternode and return the funds
 
 ## Development Fund
 
