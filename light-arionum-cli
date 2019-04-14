@@ -39,12 +39,21 @@ if (floatval(phpversion())<7.2) {
 }
 
 $localhost=false;
-
+$peer_debug=false;
+$testnet=false;
+if(file_exists(".testnet")){
+    echo "!!! Testnet !!!\n";
+    $testnet=true;
+}
 $arg1=trim($argv[1]);
 $arg2=trim($argv[2]);
 $arg3=trim($argv[3]);
 $arg4=trim($argv[4]);
 $arg5=trim($argv[5]);
+$arg6=trim($argv[6]);
+$arg7=trim($argv[7]);
+$arg8=trim($argv[8]);
+
 if ((empty($arg1)&&file_exists("wallet.aro"))||$arg1=="help"||$arg1=="-h"||$arg1=="--help") {
     die("light-arionum-cli <command> <options>\n
 Commands:\n
@@ -56,13 +65,23 @@ encrypt\t\t\t\tencrypts the wallet
 decrypt\t\t\t\tdecrypts the wallet
 transactions\t\t\tshow the latest transactions
 transaction <id>\t\tshows data about a specific transaction
-send <address> <value> <message>\tsends a transaction (message optional)
+send <address> <value> <msg>\tsends a transaction (message optional)
+
 alias send <alias> <message>\tsends a transaction (message optional)
-alias set <alias>\tsets your alias
-masternode create <ip>\tsends a masternode announcement transaction
-masternode pause\tputs the masternode on pause
-masternode resume\tresumes the masternode mining
-masternode release\tcloses the masternode and returns the funds
+alias set <alias>\t\tsets your alias
+
+masternode create <ip>\t\tsends a masternode announcement transaction
+masternode pause\t\tputs the masternode on pause
+masternode resume\t\tresumes the masternode mining
+masternode release\t\tcloses the masternode and returns the funds
+
+asset create <max_supply> <tradable yes/no> <price> <dividend only> <allow_bid>\t transforms this wallet into an asset
+asset send <asset id> <destination> <amount>\t\t\t\t\t sends asset units to another address
+asset market <asset id> <price> <units> <cancelable yes/no> <type ask/bid>\t submits an order on the blockchain asset market
+asset cancel-order <order-id>\t\t\t\t\t\t\t cancels a blockchain asset market order
+asset dividends <amount>\t\t\t\t\t\t\t distributes amount as dividends to all asset holders
+asset inflate <amount>\t\t\t\t\t\t\t\t increases the max supply if the asset is inflatable
+asset balance\t\t\t\t\t\t\t\t\t shows all assets
 ");
 }
 
@@ -225,8 +244,15 @@ function ec_verify($data, $signature, $key)
 function peer_post($url, $data=array())
 {
     global $localhost;
+    global $peer_debug;
+    global $testnet;
     if (!$localhost) {
-        $f=file("http://api.arionum.com/peers.txt");
+        if($testnet){
+            $f=file("http://api.arionum.com/testnet.txt");
+        } else {
+            $f=file("http://api.arionum.com/peers.txt");
+        }
+        
         shuffle($f);
     
         foreach ($f as $x) {
@@ -247,7 +273,7 @@ function peer_post($url, $data=array())
     $postdata = http_build_query(
         array(
             'data' => json_encode($data),
-            "coin"=>" arionum"
+            "coin"=>"arionum"
             )
     );
     
@@ -263,6 +289,10 @@ function peer_post($url, $data=array())
     $context  = stream_context_create($opts);
     
     $result = file_get_contents($peer.$url, false, $context);
+    if($peer_debug){
+      
+        echo "\n$result\n";
+    }
     $res=json_decode($result, true);
     return $res;
 }
@@ -300,6 +330,36 @@ function isAddressValid(string $address): bool
 {
     return preg_match('/^[a-z0-9]+$/i', $address);
 }
+
+
+function standard_transaction($address, $val, $version, $msg){
+ global $private_key, $public_key;
+    $fee=$val*0.0025;
+    if ($fee<0.00000001) {
+        $fee=0.00000001;
+    }
+    if ($fee>10) {
+        $fee=10;
+    }
+        
+    $val=number_format($val, 8, ".", "");
+    $fee=number_format($fee, 8, ".", "");
+
+    $date=time();
+    $info=$val."-".$fee."-".$address."-".$msg."-$version-".$public_key."-".$date;
+       
+    $signature=ec_sign($info, $private_key);
+        
+    
+    $res=peer_post("/api.php?q=send", array("dst"=>$address,"val"=>$val, "signature"=>$signature, "public_key"=>$public_key, "version"=>$version, "message"=>$msg, "date"=>$date));
+    
+    if ($res['status']!="ok") {
+        die("ERROR: $res[data]\n");
+    } else {
+        echo "Transaction id: $res[data]\n";
+    }
+}
+
 
 if (!file_exists("wallet.aro")) {
     echo "No ARO wallet found. Generating a new wallet!\n";
@@ -624,6 +684,75 @@ if ($arg1=="balance") {
         die("ERROR: $res[data]\n");
     } else {
         echo "Masternode command sent! Transaction id: $res[data]\n";
+    }
+} elseif (strtolower($arg1)=='asset') {
+    if (empty($arg2)) {
+        die("ERROR: Invalid asset command");
+    }
+    if($arg2=="create"){
+        $max_supply=intval($arg3);
+        $tradable=(strtolower($arg4) == "yes" ? 1 : 0 );
+        $price=number_format($arg5, 8, '.', '');
+        $dividend_only=(strtolower($arg6) == "yes" ? 1 : 1 );
+        $auto_divident=(strtolower($arg7) == "yes" ? 1 : 0 );
+        $allow_bid=(strtolower($arg8) == "yes" ? 1 : 0 );
+        $asset=json_encode([$max_supply,$tradable,$price,$dividend_only,$auto_divident,$allow_bid]);
+        standard_transaction($address, 100, 50, $asset);
+
+    } elseif($arg2=="send"){
+        if(empty($arg3)){
+            die("ERROR: Invalid asset id");
+        }
+        if(empty($arg4)){
+            die("ERROR: Invalid asset destination");
+        }
+        if($arg5<=0){
+            die("ERROR: Invalid asset amount");
+        }
+        $asset=json_encode([$arg3,$arg5]);
+        standard_transaction($arg4, 0.00000001, 51, $asset);
+    } elseif($arg2=="market"){
+        if(empty($arg3)){
+            die("ERROR: Invalid asset id");
+        }
+        if($arg4<0.00000001){
+            die("ERROR: Invalid price");
+        }
+        if($arg5<=0){
+            die("ERROR: Invalid asset amount");
+        }
+        $cancelable=(strtolower($arg6) == "yes" ? 1 : 0 );
+        if($arg7!="bid"&&$arg7!="ask"){
+            die("ERROR: Invalid order type");
+        }
+        $asset=json_encode([$arg3, $arg4,$arg5,$cancelable,$arg7]);
+        
+        standard_transaction($address, 0.00000001, 52, $asset);
+    } elseif($arg2=="cancel-order"){
+        if(empty($arg3)){
+            die("ERROR: Invalid order id");
+        }
+        standard_transaction($address, 0.00000001, 53, $arg3);
+    } elseif($arg2=="dividends"){
+        $val=number_format($arg3, 8, '.', '');
+        if($val<0.00000001){
+            die("ERROR: Invalid amount");
+        }
+
+        standard_transaction($address, $val, 54, '');
+    } elseif($arg2=="inflate"){
+        if($arg3<=0){
+            die("ERROR: Invalid asset amount");
+        }
+        standard_transaction($address, 0.00000001, 55, $arg3);
+    } elseif($arg2=="balance"){
+        $res=peer_post("/api.php?q=assetBalance",["account"=>$address]);
+        foreach($res['data'] as $x){
+            $alias=($x['alias'] ? $x['alias'] : $x['asset']);
+            echo "$alias\t\t\t$x[balance]\n";
+        }
+    } else {
+        echo "Invalid asset command\n";
     }
 } else {
     echo "Invalid command\n";
