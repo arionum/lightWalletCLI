@@ -75,13 +75,13 @@ masternode pause\t\tputs the masternode on pause
 masternode resume\t\tresumes the masternode mining
 masternode release\t\tcloses the masternode and returns the funds
 
-asset create <max_supply> <tradable yes/no> <price> <dividend only> <allow_bid>\t transforms this wallet into an asset
-asset send <asset id> <destination> <amount>\t\t\t\t\t sends asset units to another address
-asset market <asset id> <price> <units> <cancelable yes/no> <type ask/bid>\t submits an order on the blockchain asset market
-asset cancel-order <order-id>\t\t\t\t\t\t\t cancels a blockchain asset market order
-asset dividends <amount>\t\t\t\t\t\t\t distributes amount as dividends to all asset holders
-asset inflate <amount>\t\t\t\t\t\t\t\t increases the max supply if the asset is inflatable
-asset balance\t\t\t\t\t\t\t\t\t shows all assets
+asset create <max_supply> <tradable> <price> <dividend only> <autodividend> <allow_bid>\t transforms this wallet into an asset
+asset send <asset id> <destination> <amount>\t\t\t\t\t\t sends asset units to another address
+asset market <asset id> <price> <units> <cancelable yes/no> <type ask/bid>\t\t submits an order on the blockchain asset market
+asset cancel-order <order-id>\t\t\t\t\t\t\t\t cancels a blockchain asset market order
+asset dividends <amount>\t\t\t\t\t\t\t\t distributes amount as dividends to all asset holders
+asset inflate <amount>\t\t\t\t\t\t\t\t\t increases the max supply if the asset is inflatable
+asset balance\t\t\t\t\t\t\t\t\t\t shows all assets
 ");
 }
 
