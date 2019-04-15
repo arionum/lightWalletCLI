@@ -36,6 +36,8 @@ Command                                                                         
 `asset inflate [amount]`                                                                    | Increases the max supply if the asset is inflatable
 `asset balance`                                                                             | Shows all assets
 
+To activate the testnet mode, create a file called .testnet in the same folder
+
 ## Development Fund
 
 Coin | Address
