@@ -693,7 +693,7 @@ if ($arg1=="balance") {
         $max_supply=intval($arg3);
         $tradable=(strtolower($arg4) == "yes" ? 1 : 0 );
         $price=number_format($arg5, 8, '.', '');
-        $dividend_only=(strtolower($arg6) == "yes" ? 1 : 1 );
+        $dividend_only=(strtolower($arg6) == "yes" ? 1 : 0 );
         $auto_divident=(strtolower($arg7) == "yes" ? 1 : 0 );
         $allow_bid=(strtolower($arg8) == "yes" ? 1 : 0 );
         $asset=json_encode([$max_supply,$tradable,$price,$dividend_only,$auto_divident,$allow_bid]);
