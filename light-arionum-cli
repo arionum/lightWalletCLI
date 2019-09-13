@@ -675,7 +675,7 @@ if ($arg1=="balance") {
         echo "Your Public Key is: $vote_public_key\n";
         echo "Your Private Key is: $vote_private_key\n";
         echo "Please save the voting keys and add them to the masternode config file.\n";
-        file_put_contents("voting_key_".uniqid().".aro",$vote_wallet);
+        file_put_contents("voting_key_".uniqid().".aro", $vote_wallet);
         $val=0.00000001;
         $fee=0.00000001;
         $version=105;
@@ -741,7 +741,7 @@ if ($arg1=="balance") {
         $max_supply=intval($arg3);
         $tradable=(strtolower($arg4) == "yes" ? 1 : 0);
         $price=number_format($arg5, 8, '.', '');
-        $dividend_only=(strtolower($arg6) == "yes" ? 1 : 1);
+        $dividend_only=(strtolower($arg6) == "yes" ? 1 : 0);
         $auto_divident=(strtolower($arg7) == "yes" ? 1 : 0);
         $allow_bid=(strtolower($arg8) == "yes" ? 1 : 0);
         $asset=json_encode([$max_supply,$tradable,$price,$dividend_only,$auto_divident,$allow_bid]);
