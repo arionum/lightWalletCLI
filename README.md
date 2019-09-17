@@ -28,6 +28,9 @@ Command                                                                         
 `masternode pause`                                                                          | Pause the masternode
 `masternode resume`                                                                         | Resume the masternode
 `masternode release`                                                                        | Close the masternode and return the funds
+`masternode voting-key`									    | Generates and sends to the blockchain the voting key
+`masternode vote [voteid]`								    | Votes for a blockchain config change
+`masternode change-ip [ip]`								    | Changes the masternode IP
 `asset create [max_supply] [tradable] [price] [dividend only] [autodividend] [allow_bid]`   | Transforms this wallet into an asset
 `asset send [asset id] [destination] [amount]`                                              | Sends asset units to another address
 `asset market [asset id] [price] [units] [cancelable] [ask/bid]`                            | Submits an order on the blockchain asset market
@@ -35,6 +38,8 @@ Command                                                                         
 `asset dividends [amount]`                                                                  | Distributes amount as dividends to all asset holders
 `asset inflate [amount]`                                                                    | Increases the max supply if the asset is inflatable
 `asset balance`                                                                             | Shows all assets
+
+To activate the testnet mode, create a file called .testnet in the same folder
 
 ## Development Fund
 

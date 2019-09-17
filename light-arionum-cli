@@ -80,6 +80,7 @@ masternode resume\t\tresumes the masternode mining
 masternode release\t\tcloses the masternode and returns the funds
 masternode voting-key\t\tgenerates and sends to the blockchain the voting key
 masternode vote <vote-id>\t\tvotes for a blockchain config change
+masternode change-ip <ip>\t\tchanges the masternode IP
 
 asset create <max_supply> <tradable> <price> <dividend only> <autodividend> <allow_bid>\t transforms this wallet into an asset
 asset send <asset id> <destination> <amount>\t\t\t\t\t\t sends asset units to another address
@@ -741,9 +742,15 @@ if ($arg1=="balance") {
         $max_supply=intval($arg3);
         $tradable=(strtolower($arg4) == "yes" ? 1 : 0);
         $price=number_format($arg5, 8, '.', '');
+<<<<<<< HEAD
         $dividend_only=(strtolower($arg6) == "yes" ? 1 : 0);
         $auto_divident=(strtolower($arg7) == "yes" ? 1 : 0);
         $allow_bid=(strtolower($arg8) == "yes" ? 1 : 0);
+=======
+        $dividend_only=(strtolower($arg6) == "yes" ? 1 : 0 );
+        $auto_divident=(strtolower($arg7) == "yes" ? 1 : 0 );
+        $allow_bid=(strtolower($arg8) == "yes" ? 1 : 0 );
+>>>>>>> 15d37364304374a34400932911d568def2dfecc7
         $asset=json_encode([$max_supply,$tradable,$price,$dividend_only,$auto_divident,$allow_bid]);
         standard_transaction($address, 100, 50, $asset);
     } elseif ($arg2=="send") {
